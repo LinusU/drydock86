@@ -37,6 +37,22 @@ from a checkpoint, Apple M5 Max): 0.53× → 0.96× realtime, with an identical 
 instruction count and bit-identical frames. All tests, including the self-modifying
 code and translated-code invalidation tests, pass unchanged.
 
+**0002: per-access exit check only with memory hooks** (2026-10-17,
+`qemu/tcg/tcg-op.c`, `qemu/accel/tcg/cputlb.c`)
+
+Unicorn emits a call to `helper_check_exit_request` after every guest load and
+store, so that emulation stops right after an invalid access or after a memory hook
+requested a stop. Loads with invalid addresses already leave the translated block
+directly from the load helper; the patch does the same for stores and emits the
+per-access check only while memory hooks are installed (they are the remaining
+reason for it). Stops requested elsewhere are unaffected: block starts still check
+for them, and code hooks keep their own check. A program adding a memory hook to code
+that was translated earlier must flush the translation cache to get the check; Drydock
+does so when it adds or removes a watchpoint.
+
+Effect on the same benchmark: best of three 0.997× → 1.135× realtime, identical guest
+execution; the full drive scenario runs at 1.31× realtime.
+
 To update Unicorn: replace `unicorn-engine-sys/` with the new published crate, apply
 the patches in order (`patch -p1 -d vendor < vendor/patches/0001-…`), and re-run the
 tests.

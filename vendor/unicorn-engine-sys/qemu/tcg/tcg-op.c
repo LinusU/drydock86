@@ -2872,6 +2872,21 @@ void check_exit_request(TCGContext *tcg_ctx)
     tcg_temp_free_ptr(tcg_ctx, puc);
 }
 
+/* Drydock: the exit check after a guest memory access only matters when a memory
+ * hook may stop emulation from inside the access. Invalid accesses leave the
+ * translated block directly from the load/store helpers. */
+static void check_exit_request_mem(TCGContext *tcg_ctx)
+{
+    struct uc_struct *uc = tcg_ctx->uc;
+    if (HOOK_EXISTS(uc, UC_HOOK_MEM_READ) || HOOK_EXISTS(uc, UC_HOOK_MEM_WRITE) ||
+        HOOK_EXISTS(uc, UC_HOOK_MEM_READ_AFTER) || HOOK_EXISTS(uc, UC_HOOK_MEM_FETCH) ||
+        HOOK_EXISTS(uc, UC_HOOK_MEM_READ_UNMAPPED) || HOOK_EXISTS(uc, UC_HOOK_MEM_WRITE_UNMAPPED) ||
+        HOOK_EXISTS(uc, UC_HOOK_MEM_FETCH_UNMAPPED) || HOOK_EXISTS(uc, UC_HOOK_MEM_READ_PROT) ||
+        HOOK_EXISTS(uc, UC_HOOK_MEM_WRITE_PROT) || HOOK_EXISTS(uc, UC_HOOK_MEM_FETCH_PROT)) {
+        check_exit_request(tcg_ctx);
+    }
+}
+
 static void tcg_gen_req_mo(TCGContext *tcg_ctx, TCGBar type)
 {
 #ifdef TCG_GUEST_DEFAULT_MO
@@ -2917,7 +2932,7 @@ void tcg_gen_qemu_ld_i32(TCGContext *tcg_ctx, TCGv_i32 val, TCGv addr, TCGArg id
         }
     }
 
-    check_exit_request(tcg_ctx);
+    check_exit_request_mem(tcg_ctx);
 }
 
 void tcg_gen_qemu_st_i32(TCGContext *tcg_ctx, TCGv_i32 val, TCGv addr, TCGArg idx, MemOp memop)
@@ -2952,7 +2967,7 @@ void tcg_gen_qemu_st_i32(TCGContext *tcg_ctx, TCGv_i32 val, TCGv addr, TCGArg id
         tcg_temp_free_i32(tcg_ctx, swap);
     }
 
-    check_exit_request(tcg_ctx);
+    check_exit_request_mem(tcg_ctx);
 }
 
 void tcg_gen_qemu_ld_i64(TCGContext *tcg_ctx, TCGv_i64 val, TCGv addr, TCGArg idx, MemOp memop)
@@ -2967,7 +2982,7 @@ void tcg_gen_qemu_ld_i64(TCGContext *tcg_ctx, TCGv_i64 val, TCGv addr, TCGArg id
         } else {
             tcg_gen_movi_i32(tcg_ctx, TCGV_HIGH(tcg_ctx, val), 0);
         }
-        check_exit_request(tcg_ctx);
+        check_exit_request_mem(tcg_ctx);
         return;
     }
 #endif
@@ -3009,7 +3024,7 @@ void tcg_gen_qemu_ld_i64(TCGContext *tcg_ctx, TCGv_i64 val, TCGv addr, TCGArg id
             g_assert_not_reached();
         }
     }
-    check_exit_request(tcg_ctx);
+    check_exit_request_mem(tcg_ctx);
 }
 
 void tcg_gen_qemu_st_i64(TCGContext *tcg_ctx, TCGv_i64 val, TCGv addr, TCGArg idx, MemOp memop)
@@ -3019,7 +3034,7 @@ void tcg_gen_qemu_st_i64(TCGContext *tcg_ctx, TCGv_i64 val, TCGv addr, TCGArg id
 #if TCG_TARGET_REG_BITS == 32
     if ((memop & MO_SIZE) < MO_64) {
         tcg_gen_qemu_st_i32(tcg_ctx, TCGV_LOW(tcg_ctx, val), addr, idx, memop);
-        check_exit_request(tcg_ctx);
+        check_exit_request_mem(tcg_ctx);
         return;
     }
 #endif
@@ -3055,7 +3070,7 @@ void tcg_gen_qemu_st_i64(TCGContext *tcg_ctx, TCGv_i64 val, TCGv addr, TCGArg id
     if (swap) {
         tcg_temp_free_i64(tcg_ctx, swap);
     }
-    check_exit_request(tcg_ctx);
+    check_exit_request_mem(tcg_ctx);
 }
 
 static void tcg_gen_ext_i32(TCGContext *tcg_ctx, TCGv_i32 ret, TCGv_i32 val, MemOp opc)

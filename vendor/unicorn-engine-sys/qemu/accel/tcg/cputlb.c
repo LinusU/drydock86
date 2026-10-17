@@ -2243,6 +2243,11 @@ store_helper(CPUArchState *env, target_ulong addr, uint64_t val,
             uc->invalid_error = UC_ERR_WRITE_UNMAPPED;
             // printf("***** Invalid memory write at " TARGET_FMT_lx "\n", addr);
             cpu_exit(uc->cpu);
+            /* Drydock: leave the block now, as loads do, rather than relying on an
+             * exit check after every store. */
+            if (uc->nested_level > 0 && !uc->cpu->stopped) {
+                cpu_loop_exit_restore(uc->cpu, retaddr);
+            }
             return;
         } else {
             uc->invalid_error = UC_ERR_OK;
@@ -2262,6 +2267,10 @@ store_helper(CPUArchState *env, target_ulong addr, uint64_t val,
             if (mr == NULL) {
                 uc->invalid_error = UC_ERR_MAP;
                 cpu_exit(uc->cpu);
+                /* Drydock: leave the block now, as loads do. */
+                if (uc->nested_level > 0 && !uc->cpu->stopped) {
+                    cpu_loop_exit_restore(uc->cpu, retaddr);
+                }
                 return;
             }
         }
@@ -2308,6 +2317,11 @@ store_helper(CPUArchState *env, target_ulong addr, uint64_t val,
             uc->invalid_error = UC_ERR_WRITE_PROT;
             // printf("***** Invalid memory write (ro) at " TARGET_FMT_lx "\n", addr);
             cpu_exit(uc->cpu);
+            /* Drydock: leave the block now, as loads do, rather than relying on an
+             * exit check after every store. */
+            if (uc->nested_level > 0 && !uc->cpu->stopped) {
+                cpu_loop_exit_restore(uc->cpu, retaddr);
+            }
             return;
         }
     }
@@ -2318,6 +2332,11 @@ store_helper(CPUArchState *env, target_ulong addr, uint64_t val,
             uc->invalid_addr = paddr;
             uc->invalid_error = UC_ERR_NOMEM;
             cpu_exit(uc->cpu);
+            /* Drydock: leave the block now, as loads do, rather than relying on an
+             * exit check after every store. */
+            if (uc->nested_level > 0 && !uc->cpu->stopped) {
+                cpu_loop_exit_restore(uc->cpu, retaddr);
+            }
             return;
         }
         /* refill tlb after CoW */
