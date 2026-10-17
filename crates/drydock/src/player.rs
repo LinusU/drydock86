@@ -175,6 +175,7 @@ fn session_thread(args: RunArgs, rx: Receiver<ToSession>, tx: SyncSender<ToUi>, 
     }
     let mut d = Driver::new(s, Pacing::Realtime);
     let mut last_frame = u64::MAX;
+    let mut inflight: Option<drydock_win32::observe::PresentJob> = None;
     let mut last_rel: Option<(i32, i32)> = None;
     loop {
         loop {
@@ -206,12 +207,19 @@ fn session_thread(args: RunArgs, rx: Receiver<ToSession>, tx: SyncSender<ToUi>, 
             let _ = proxy.send_event(());
             return;
         }
-        if d.s.frames_presented != last_frame {
+        // Presentation is pipelined: a frame is read back while emulation continues,
+        // and a new readback starts only once the previous one has been delivered.
+        d.s.present_poll();
+        if let Some(job) = inflight.as_mut()
+            && let Some((w, h, rgba)) = job.try_finish()
+        {
+            inflight = None;
+            let _ = tx.try_send(ToUi::Frame(Frame { w, h, rgba }));
+            let _ = proxy.send_event(());
+        }
+        if d.s.frames_presented != last_frame && inflight.is_none() {
             last_frame = d.s.frames_presented;
-            if let Some((w, h, rgba)) = d.s.present_rgba() {
-                let _ = tx.try_send(ToUi::Frame(Frame { w, h, rgba }));
-                let _ = proxy.send_event(());
-            }
+            inflight = d.s.present_begin();
         }
         match stop {
             RunStop::TimeReached | RunStop::Presented { .. } => {}
