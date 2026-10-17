@@ -173,6 +173,8 @@ impl Resume {
 pub enum Cont {
     /// Return the callback's EAX as the API result.
     ReturnValue,
+    /// Re-run the API with its original arguments (after a wait).
+    Retry,
     /// Return a fixed value, ignoring the callback result.
     ReturnConst(u32),
     /// Wait completion: return WAIT_OBJECT_0+i / WAIT_TIMEOUT.

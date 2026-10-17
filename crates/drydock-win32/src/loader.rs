@@ -302,6 +302,23 @@ fn dynamic_stub(s: &mut Session, base: u32, name: &str, ordinal: u16) -> Result<
     Ok(addr)
 }
 
+/// Allocate a non-exported thunk inside a builtin module (COM methods, window
+/// procedures of system classes, internal callbacks).
+pub fn internal_thunk(
+    s: &mut Session,
+    module: &'static str,
+    name: &str,
+    conv: Conv,
+    handler: Option<Handler>,
+) -> Result<u32, String> {
+    let base = load_builtin(s, module)?;
+    let addr = dynamic_stub(s, base, name, 0)?;
+    let t = s.thunks.map.get_mut(&addr).unwrap();
+    t.conv = conv;
+    t.handler = handler;
+    Ok(addr)
+}
+
 // ---------------------------------------------------------------- guest images
 
 /// Resolve an export of a loaded module to an address (following forwarders).

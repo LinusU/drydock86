@@ -395,7 +395,7 @@ impl Session {
                 ThreadState::Ready,
             );
             if let ThreadState::Resume { api, cont, val } = state {
-                let r = self.resume(cont, val);
+                let r = self.resume_api(api, cont, val);
                 self.finish_api(api, r);
                 continue;
             }
@@ -643,12 +643,24 @@ impl Session {
         self.cpu.set_reg(Reg::EDI, f.saved[2]);
         self.cpu.set_reg(Reg::EBP, f.saved[3]);
         self.cb_bufs = f.bufs;
-        let r = self.resume(f.cont, Resume::Returned { eax, edx });
+        let r = self.resume_api(f.api, f.cont, Resume::Returned { eax, edx });
         self.finish_api(f.api, r);
+    }
+
+    /// Resume an API activation; `Cont::Retry` re-dispatches the API's handler.
+    pub fn resume_api(&mut self, api: u32, cont: Cont, v: Resume) -> ApiResult {
+        if let Cont::Retry = cont {
+            return match self.thunks.get(api).and_then(|t| t.handler) {
+                Some(h) => h(self),
+                None => Err(ApiError::Unimplemented(self.thunks.name_of(api))),
+            };
+        }
+        self.resume(cont, v)
     }
 
     pub fn resume(&mut self, cont: Cont, v: Resume) -> ApiResult {
         match cont {
+            Cont::Retry => Err(ApiError::Fatal("Retry continuation outside an API".into())),
             Cont::ReturnValue => Ok(ApiRet::Ret(v.eax())),
             Cont::ReturnConst(c) => Ok(ApiRet::Ret(c)),
             Cont::WaitResult => Ok(ApiRet::Ret(v.eax())),
