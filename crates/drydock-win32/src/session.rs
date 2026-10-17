@@ -161,6 +161,8 @@ pub struct Host {
     pub gpu_error: Option<String>,
     /// Guest-memory version last uploaded per surface.
     pub gpu_versions: std::collections::HashMap<u32, u64>,
+    /// Where mixed audio goes (host device, file, or nothing).
+    pub audio: Option<Box<dyn drydock_audio::AudioSink>>,
 }
 
 pub struct Session {
@@ -189,6 +191,19 @@ pub struct Session {
     pub frames_presented: u64,
     pub pending_present_stop: bool,
     pub exited: Option<u32>,
+    pub stats: RunStats,
+}
+
+/// Execution statistics (host-side observations; not guest state).
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+pub struct RunStats {
+    pub slices: u64,
+    pub budget_insns: u64,
+    pub stop_budget: u64,
+    pub stop_api: u64,
+    pub stop_fault: u64,
+    pub budget_by_horizon: u64,
+    pub thread_switches: u64,
 }
 
 impl Session {
@@ -217,6 +232,7 @@ impl Session {
             frames_presented: 0,
             pending_present_stop: false,
             exited: None,
+            stats: RunStats::default(),
         };
         {
             let st = s.cpu.state_mut();
@@ -301,6 +317,7 @@ impl Session {
         {
             t.regs = self.cpu.read_regs();
         }
+        self.stats.thread_switches += 1;
         let regs = self.sched.threads[&tid].regs.clone();
         self.cpu.write_regs(&mut self.mem, &regs)?;
         self.sched.loaded = Some(tid);
@@ -386,8 +403,10 @@ impl Session {
                     }
                 }
             };
-            if self.sched.current != Some(tid) {
-                let q = self.cpu.state().insns + QUANTUM_INSNS;
+            // A new quantum starts on a switch, or when the running thread's quantum
+            // expired and it was picked again.
+            if self.sched.current != Some(tid) || insns >= self.sched.threads[&tid].quantum_end {
+                let q = insns + QUANTUM_INSNS;
                 self.sched.threads.get_mut(&tid).unwrap().quantum_end = q;
             }
             if let Err(e) = self.switch_to(tid) {
@@ -413,12 +432,24 @@ impl Session {
                 .next_event_time()
                 .unwrap_or(u64::MAX)
                 .min(limit.until_ns);
-            budget = budget.min(ns_to_insns(horizon.saturating_sub(now)).max(1));
+            let hb = ns_to_insns(horizon.saturating_sub(now)).max(1);
+            if hb < budget {
+                self.stats.budget_by_horizon += 1;
+            }
+            budget = budget.min(hb);
             if let Some(m) = limit.max_insns {
                 budget = budget.min(m - used);
             }
             let before = self.cpu.state().insns;
+            self.stats.slices += 1;
+            self.stats.budget_insns += budget;
             let stop = self.cpu.run_slice(&mut self.mem, budget, now);
+            match &stop {
+                Ok(Stop::Budget) => self.stats.stop_budget += 1,
+                Ok(Stop::ApiTrap { .. }) => self.stats.stop_api += 1,
+                Ok(Stop::Fault(_)) => self.stats.stop_fault += 1,
+                _ => {}
+            }
             let ran = self.cpu.state().insns - before;
             self.clock.charge_insns(ran, &self.config.cpu);
             match stop {
