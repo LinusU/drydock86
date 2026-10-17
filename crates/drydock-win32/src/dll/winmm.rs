@@ -28,6 +28,15 @@ pub struct MmState {
     pub timers: Vec<MmTimer>,
     pub next_timer: u32,
     pub timer_thread: Option<u32>,
+    pub mci: std::collections::BTreeMap<u32, MciDevice>,
+    pub next_mci: u32,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct MciDevice {
+    pub kind: String,
+    pub element: String,
+    pub alias: String,
 }
 
 impl Default for MmState {
@@ -38,6 +47,8 @@ impl Default for MmState {
             timers: Vec::new(),
             next_timer: 1,
             timer_thread: None,
+            mci: Default::default(),
+            next_mci: 1,
         }
     }
 }
@@ -297,7 +308,118 @@ fn joy_get_dev_caps_a(s: &mut Session) -> ApiResult {
     Ok(ApiRet::Ret(0))
 }
 
+// ---------------------------------------------------------------- MCI
+
+const MCI_OPEN: u32 = 0x803;
+const MCI_CLOSE: u32 = 0x804;
+const MCI_PLAY: u32 = 0x806;
+const MCI_STOP: u32 = 0x808;
+const MCI_PAUSE: u32 = 0x809;
+const MCIERR_INVALID_DEVICE_ID: u32 = 257;
+const MCIERR_UNRECOGNIZED_COMMAND: u32 = 261;
+const MCIERR_INVALID_DEVICE_NAME: u32 = 263;
+const MCIERR_DEVICE_NOT_READY: u32 = 276;
+const MCIERR_DEVICE_NOT_INSTALLED: u32 = 306;
+
+fn mci_error_text(e: u32) -> &'static str {
+    match e {
+        0 => "The specified command was carried out.",
+        MCIERR_INVALID_DEVICE_ID => "Invalid MCI device ID. Use the ID returned when opening the MCI device.",
+        MCIERR_UNRECOGNIZED_COMMAND => "The driver cannot recognize the specified command.",
+        MCIERR_INVALID_DEVICE_NAME => "The specified device is not open or is not recognized by MCI.",
+        MCIERR_DEVICE_NOT_READY => "The device is not ready.",
+        MCIERR_DEVICE_NOT_INSTALLED => "The specified device is not installed on the system.",
+        _ => "Unknown MCI error.",
+    }
+}
+
+fn mci_open(s: &mut Session, flags: u32, parms: u32) -> Result<u32, ApiError> {
+    let ty_p = s.mem.read_u32(parms + 8)?;
+    let el_p = s.mem.read_u32(parms + 12)?;
+    let al_p = s.mem.read_u32(parms + 16)?;
+    let kind = if flags & 0x1000 != 0 {
+        // MCI_OPEN_TYPE_ID: LOWORD = device type constant.
+        match ty_p & 0xffff {
+            516 => "cdaudio".to_string(),
+            519 => "avivideo".to_string(),
+            522 => "waveaudio".to_string(),
+            523 => "sequencer".to_string(),
+            other => format!("#{other}"),
+        }
+    } else if flags & 0x2000 != 0 {
+        s.read_str(ty_p)?.to_lowercase()
+    } else if flags & 0x200 != 0 {
+        // Type from the element's extension.
+        let e = s.read_str(el_p)?.to_lowercase();
+        match e.rsplit('.').next() {
+            Some("avi") => "avivideo".into(),
+            Some("wav") => "waveaudio".into(),
+            Some("mid") | Some("rmi") => "sequencer".into(),
+            _ => String::new(),
+        }
+    } else {
+        String::new()
+    };
+    let element = if flags & 0x200 != 0 && el_p != 0 { s.read_str(el_p)? } else { String::new() };
+    let alias = if flags & 0x400 != 0 && al_p != 0 { s.read_str(al_p)? } else { String::new() };
+    match kind.as_str() {
+        "cdaudio" => {
+            let has_cd = s.vfs.drives.values().any(|d| d.kind == crate::vfs::DriveKind::CdRom);
+            if !has_cd {
+                s.event(
+                    crate::diag::Severity::Warning,
+                    "mci",
+                    "CD audio requested but no CD-ROM drive is mapped in this session".into(),
+                );
+                return Ok(MCIERR_DEVICE_NOT_READY);
+            }
+            s.missing("mci", "CD audio playback from a mapped CD-ROM drive".into());
+            Ok(MCIERR_DEVICE_NOT_READY)
+        }
+        "" => Ok(MCIERR_INVALID_DEVICE_NAME),
+        other => {
+            s.missing("mci", format!("MCI device type {other:?} (element {element:?})"));
+            let _ = alias;
+            Ok(MCIERR_DEVICE_NOT_INSTALLED)
+        }
+    }
+}
+
+fn mci_send_command_a(s: &mut Session) -> ApiResult {
+    let [dev, msg, flags, parms] = s.args::<4>()?;
+    let r = match msg {
+        MCI_OPEN => mci_open(s, flags, parms)?,
+        MCI_CLOSE | MCI_STOP | MCI_PAUSE | MCI_PLAY if dev == 0xffff_ffff || dev == 0xffff => {
+            // Applies to every open device (none are open when this succeeds trivially).
+            if msg == MCI_CLOSE {
+                s.winmm.mci.clear();
+            }
+            if !s.winmm.mci.is_empty() && msg != MCI_CLOSE {
+                s.missing("mci", format!("command {msg:#x} on all devices with open devices"));
+            }
+            0
+        }
+        _ => {
+            if !s.winmm.mci.contains_key(&dev) {
+                MCIERR_INVALID_DEVICE_ID
+            } else {
+                s.missing("mci", format!("command {msg:#x} for device {dev}"));
+                MCIERR_UNRECOGNIZED_COMMAND
+            }
+        }
+    };
+    Ok(ApiRet::Ret(r))
+}
+
+fn mci_get_error_string_a(s: &mut Session) -> ApiResult {
+    let [e, buf, n] = s.args::<3>()?;
+    s.write_str_trunc(buf, n, mci_error_text(e))?;
+    Ok(ApiRet::Ret(1))
+}
+
 pub static WINMM_EXPORTS: &[ExportDef] = &[
+    export!("mciGetErrorStringA", 3, mci_get_error_string_a),
+    export!("mciSendCommandA", 4, mci_send_command_a),
     export!("joyGetDevCapsA", 3, joy_get_dev_caps_a),
     export!("joyGetNumDevs", 0, joy_get_num_devs),
     export!("joyGetPos", 2, joy_get_pos),
