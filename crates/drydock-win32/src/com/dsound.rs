@@ -1343,3 +1343,69 @@ pub static DSOUND_EXPORTS: &[ExportDef] = &[
     export!("DirectSoundCreate" @ 1, 3, direct_sound_create),
     export!("DirectSoundEnumerateA" @ 2, 2, direct_sound_enumerate_a),
 ];
+
+/// Observable state of one playing secondary buffer.
+#[derive(Debug, Clone, Serialize)]
+pub struct VoiceInfo {
+    pub object: u32,
+    pub looping: bool,
+    pub freq: u32,
+    pub volume: i32,
+    pub pan: i32,
+    pub is_3d: bool,
+    pub mode_3d: u32,
+    pub position: [f32; 3],
+    pub min_distance: f32,
+    pub max_distance: f32,
+    /// Effective (left, right) gains and pitch factor applied by the mixer.
+    pub gain: (f32, f32),
+    pub pitch: f32,
+    /// Peak absolute sample value in the buffer (0..1), to spot silent data.
+    pub peak: f32,
+    pub bytes: u32,
+}
+
+/// Mixer-level summary of what is audible at this moment.
+#[derive(Debug, Clone, Serialize)]
+pub struct AudioInfo {
+    pub frames_mixed: u64,
+    pub primary_volume: i32,
+    pub listener: Listener,
+    pub voices: Vec<VoiceInfo>,
+}
+
+impl Session {
+    pub fn audio_info(&self) -> AudioInfo {
+        let g = &self.com.dsound;
+        let voices = g
+            .playing
+            .iter()
+            .filter_map(|id| self.dsbuf(*id).map(|b| (*id, b)))
+            .filter(|(_, b)| !b.primary)
+            .map(|(id, b)| {
+                let (l, r, pitch) = spatial(g, b);
+                let data = self.mem.read_vec(b.mem, b.size).unwrap_or_default();
+                let frames = b.frames() as usize;
+                let peak = (0..frames).map(|f| sample(&data, &b.fmt, f, 0).abs()).fold(0.0, f32::max);
+                VoiceInfo {
+                    peak,
+                    bytes: b.size,
+                    object: id,
+                    looping: b.looping,
+                    freq: b.freq,
+                    volume: b.volume,
+                    pan: b.pan,
+                    is_3d: b.flags & DSBCAPS_CTRL3D != 0,
+                    mode_3d: b.p3d.mode,
+                    position: b.p3d.position,
+                    min_distance: b.p3d.min_distance,
+                    max_distance: b.p3d.max_distance,
+                    gain: (l, r),
+                    pitch,
+                }
+            })
+            .collect();
+        AudioInfo { frames_mixed: g.frames_mixed, primary_volume: g.primary_volume, listener: g.listener, voices }
+    }
+}
+

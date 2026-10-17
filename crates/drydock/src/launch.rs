@@ -203,6 +203,7 @@ pub fn report(d: &crate::driver::Driver, stop: &RunStop) -> serde_json::Value {
         "api_calls": s.diag.api_counts.values().sum::<u64>(),
         "run_stats": s.stats,
         "threads": d.s.threads_info_static(),
+        "audio": d.s.audio_info(),
         "trace": s.diag.trace,
     })
 }
