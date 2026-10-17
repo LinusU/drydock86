@@ -319,11 +319,13 @@ pub fn service(s: &mut Session) {
         return;
     }
     let now = s.clock.now_ns();
-    for id in s.playing_ids() {
-        settle(s, id, now);
-    }
+    // Mix before settling: settling re-anchors each buffer's timeline at `now`, and
+    // the mixer needs the anchors that were valid across the window it renders.
     if s.host.audio.is_some() && now >= s.com.dsound.mixed_until + MIX_TICK_NS {
         mix_to(s, now);
+    }
+    for id in s.playing_ids() {
+        settle(s, id, now);
     }
 }
 
@@ -1409,3 +1411,61 @@ impl Session {
     }
 }
 
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::sync::{Arc, Mutex};
+
+    struct Capture(Arc<Mutex<Vec<f32>>>);
+    impl drydock_audio::AudioSink for Capture {
+        fn push(&mut self, stereo: &[f32]) {
+            self.0.lock().unwrap().extend_from_slice(stereo);
+        }
+        fn name(&self) -> String {
+            "capture".into()
+        }
+    }
+
+    #[test]
+    fn looping_buffer_is_audible_across_service_ticks() {
+        let mut s = crate::testutil::session_with(&drydock_fixtures::exit_with(0));
+        let out = Arc::new(Mutex::new(Vec::new()));
+        s.host.audio = Some(Box::new(Capture(out.clone())));
+        s.com.dsound.created = true;
+        // 100 frames of mono 16-bit DC at half scale.
+        let size = 200;
+        let mem = s.mem.alloc(None, 0x1000, drydock_core::mem::RegionKind::Private, drydock_core::mem::PAGE_READWRITE, "dsb").unwrap();
+        let data: Vec<u8> = (0..100).flat_map(|_| 0x4000i16.to_le_bytes()).collect();
+        s.mem.write(mem, &data).unwrap();
+        let b = DsBuffer {
+            primary: false,
+            flags: DSBCAPS_CTRLVOLUME,
+            mem,
+            size,
+            fmt: Wfx { tag: 1, channels: 1, rate: 22050, bits: 16, block: 2 },
+            mem_owner: 0,
+            playing: true,
+            looping: true,
+            anchor_ns: 0,
+            anchor_frame: 0,
+            freq: 22050,
+            volume: 0,
+            pan: 0,
+            notify: Vec::new(),
+            last_pos: 0,
+            p3d: Params3d::default(),
+            pending_3d: None,
+        };
+        let id = s.com_new(ComKind::DSBuffer(Box::new(b)));
+        s.com.dsound.buffers.insert(id);
+        s.com.dsound.playing.insert(id);
+        for k in 1..=20 {
+            s.clock.advance_to(k * MIX_TICK_NS);
+            service(&mut s);
+        }
+        let out = out.lock().unwrap();
+        assert_eq!(out.len(), 2 * 4410, "100 ms of stereo output");
+        let silent = out.iter().filter(|v| (**v - 0.5).abs() > 1e-3).count();
+        assert_eq!(silent, 0, "every output sample carries the buffer's signal");
+    }
+}
