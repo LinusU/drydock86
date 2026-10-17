@@ -10,12 +10,23 @@
 //!     { "key": "A", "mods": ["ALT"] },
 //!     { "click": [320, 240] },
 //!     { "screenshot": "after.png" },
-//!     { "assert": { "frames_at_least": 1 } }
+//!     { "assert": { "frames_at_least": 1 } },
+//!     { "savepoint": "before-race" },
+//!     { "save": "before-race.ddck" },
+//!     { "restore": "before-race" }
 //! ] }
+//! ```
+//!
+//! `savepoint` keeps a checkpoint in memory for this run; `save` writes one to the
+//! artifacts directory. `restore` takes a savepoint name, or a checkpoint file (relative
+//! to the artifacts directory).
+//!
+//! ```text
 //! ```
 
 use crate::driver::Driver;
 use anyhow::{Result, bail};
+use drydock_win32::checkpoint::Checkpoint;
 use drydock_win32::input::{InputEvent, parse_vk};
 use drydock_win32::session::RunStop;
 use serde::{Deserialize, Serialize};
@@ -58,6 +69,9 @@ pub enum Step {
     Assert { assert: Cond },
     AnswerDialog { answer_dialog: u32 },
     ReleaseAll { release_all: bool },
+    Savepoint { savepoint: String },
+    Save { save: String },
+    Restore { restore: String },
     Note { note: String },
 }
 
@@ -156,6 +170,7 @@ fn advance(d: &mut Driver, dt: u64) -> Option<RunStop> {
 
 pub fn run(d: &mut Driver, sc: &Scenario, artifacts: &Path) -> Result<Outcome> {
     let mut log = Vec::new();
+    let mut savepoints: std::collections::HashMap<String, Checkpoint> = Default::default();
     for (i, step) in sc.steps.iter().enumerate() {
         let t = d.s.clock.now_ns() as f64 / 1e9;
         log.push(serde_json::json!({ "step": i, "t": t, "do": step }));
@@ -277,6 +292,32 @@ pub fn run(d: &mut Driver, sc: &Scenario, artifacts: &Path) -> Result<Outcome> {
                 let now = d.s.clock.now_ns();
                 d.s.user.input.release_all(now);
                 advance(d, 1_000_000)
+            }
+            Step::Savepoint { savepoint } => {
+                let t0 = std::time::Instant::now();
+                savepoints.insert(savepoint.clone(), d.s.checkpoint(savepoint));
+                log.push(serde_json::json!({ "savepoint": savepoint, "host_ms": t0.elapsed().as_secs_f64() * 1e3 }));
+                None
+            }
+            Step::Save { save } => {
+                let t0 = std::time::Instant::now();
+                let path = artifacts.join(save);
+                let cp = d.s.checkpoint(save);
+                cp.write_to(&path).map_err(anyhow::Error::msg)?;
+                let bytes = std::fs::metadata(&path).map(|m| m.len()).unwrap_or(0);
+                log.push(serde_json::json!({ "saved": path, "bytes": bytes, "host_ms": t0.elapsed().as_secs_f64() * 1e3 }));
+                None
+            }
+            Step::Restore { restore } => {
+                let t0 = std::time::Instant::now();
+                let cp = match savepoints.get(restore) {
+                    Some(cp) => cp.clone(),
+                    None => Checkpoint::read_from(&artifacts.join(restore)).map_err(anyhow::Error::msg)?,
+                };
+                d.s.restore(&cp, true).map_err(anyhow::Error::msg)?;
+                d.reanchor();
+                log.push(serde_json::json!({ "restored": restore, "t": cp.info.virtual_ns as f64 / 1e9, "host_ms": t0.elapsed().as_secs_f64() * 1e3 }));
+                None
             }
             Step::Note { .. } => None,
         };
