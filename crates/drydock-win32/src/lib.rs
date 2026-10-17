@@ -21,5 +21,7 @@ pub mod strings;
 pub mod surface;
 pub mod surface_dxt;
 pub mod sync;
+#[cfg(test)]
+pub mod testutil;
 pub mod thunks;
 pub mod vfs;
