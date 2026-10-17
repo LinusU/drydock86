@@ -45,6 +45,19 @@ pub struct RunArgs {
     /// Directory for reports, screenshots and captures.
     #[arg(long)]
     pub artifacts: Option<PathBuf>,
+    /// Audio output: none (virtual device only), discard (mix and drop), device, or
+    /// wav:<path> (capture). Several may be combined with '+'.
+    #[arg(long, default_value = "none")]
+    pub audio: String,
+    /// Request the graphics backend's software (fallback) adapter.
+    #[arg(long)]
+    pub software_gpu: bool,
+    /// Restrict graphics backends (vulkan, metal, gl, dx12).
+    #[arg(long = "gpu-backend")]
+    pub gpu_backend: Vec<String>,
+    /// Attach a virtual joystick.
+    #[arg(long)]
+    pub joystick: bool,
     /// Host pacing of the virtual clock.
     #[arg(long, value_enum, default_value_t = crate::driver::Pacing::Unthrottled)]
     pub pacing: crate::driver::Pacing,
@@ -88,6 +101,36 @@ pub fn build_session(a: &RunArgs) -> Result<Session> {
     Session::new(config, vfs, registry).map_err(anyhow::Error::msg)
 }
 
+pub fn audio_sink(spec: &str) -> Result<Option<Box<dyn drydock_audio::AudioSink>>> {
+    let mut sinks: Vec<Box<dyn drydock_audio::AudioSink>> = Vec::new();
+    for part in spec.split('+') {
+        match part {
+            "none" | "" => {}
+            "discard" => sinks.push(Box::new(drydock_audio::NullSink { frames: 0 })),
+            "device" => sinks.push(Box::new(drydock_audio::DeviceSink::open().map_err(anyhow::Error::msg)?)),
+            p if p.starts_with("wav:") => {
+                sinks.push(Box::new(drydock_audio::WavSink::create(std::path::Path::new(&p[4..]))?))
+            }
+            other => bail!("unknown audio output {other:?}"),
+        }
+    }
+    Ok(match sinks.len() {
+        0 => None,
+        1 => sinks.pop(),
+        _ => Some(Box::new(drydock_audio::Tee(sinks))),
+    })
+}
+
+pub fn configure_host(s: &mut Session, a: &RunArgs) -> Result<()> {
+    s.host.gpu_options = drydock_gfx::GpuOptions {
+        software: a.software_gpu,
+        backends: a.gpu_backend.clone(),
+    };
+    s.host.audio = audio_sink(&a.audio)?;
+    s.user.input.joy_present = a.joystick;
+    Ok(())
+}
+
 pub fn provenance(s: &Session, a: &RunArgs) -> serde_json::Value {
     let modules: Vec<_> = s
         .modules
@@ -108,11 +151,20 @@ pub fn provenance(s: &Session, a: &RunArgs) -> serde_json::Value {
         "windows_profile": s.config.windows,
         "cpu_profile": s.config.cpu,
         "pacing": a.pacing,
+        "audio": a.audio,
+        "gpu": s.host.renderer.as_ref().map(|r| serde_json::to_value(&r.gpu.report).unwrap()),
+        "gpu_error": s.host.gpu_error,
         "modules": modules,
         "input_timeline": s.user.input.recorded,
         "debugger_mutations": s.diag.mutations,
         "scenario": a.scenario,
     })
+}
+
+fn top_apis(s: &Session) -> Vec<serde_json::Value> {
+    let mut v: Vec<_> = s.diag.api_counts.iter().collect();
+    v.sort_by(|a, b| b.1.cmp(a.1));
+    v.into_iter().take(25).map(|(k, n)| serde_json::json!([k, n])).collect()
 }
 
 pub fn report(d: &crate::driver::Driver, stop: &RunStop) -> serde_json::Value {
@@ -133,6 +185,10 @@ pub fn report(d: &crate::driver::Driver, stop: &RunStop) -> serde_json::Value {
         "events": s.diag.events.iter().rev().take(60).collect::<Vec<_>>(),
         "debug_output": s.diag.debug_output.iter().rev().take(40).collect::<Vec<_>>(),
         "windows": s.windows_info(),
+        "api_top": top_apis(s),
+        "api_calls": s.diag.api_counts.values().sum::<u64>(),
+        "run_stats": s.stats,
+        "threads": d.s.threads_info_static(),
         "trace": s.diag.trace,
     })
 }
@@ -145,6 +201,7 @@ pub fn run(a: RunArgs) -> Result<()> {
         s.diag.trace_filter.include = a.trace.iter().filter(|t| *t != "*").cloned().collect();
     }
     s.user.auto_dismiss_dialogs = a.auto_dismiss_dialogs;
+    configure_host(&mut s, &a)?;
     let artifacts = a.artifacts.clone().unwrap_or_else(|| PathBuf::from("local/artifacts/last"));
     std::fs::create_dir_all(&artifacts)?;
     let mut d = crate::driver::Driver::new(s, a.pacing);

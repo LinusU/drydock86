@@ -88,3 +88,40 @@ fn bench_api_trap_roundtrip() {
     let dt = t.elapsed().as_secs_f64();
     eprintln!("api trap: {traps} round trips in {dt:.3}s = {:.2} us each", dt * 1e6 / traps as f64);
 }
+
+#[test]
+#[ignore]
+fn bench_call_ret_and_stores() {
+    // A loop calling a small function that stores to memory: typical compiled code.
+    let mut a = CodeAssembler::new(32).unwrap();
+    let mut l = a.create_label();
+    let mut f = a.create_label();
+    a.mov(ecx, 10_000_000).unwrap();
+    a.set_label(&mut l).unwrap();
+    a.push(ecx).unwrap();
+    a.call(f).unwrap();
+    a.add(esp, 4).unwrap();
+    a.dec(ecx).unwrap();
+    a.jnz(l).unwrap();
+    a.int(0x2e).unwrap();
+    a.set_label(&mut f).unwrap();
+    a.push(ebp).unwrap();
+    a.mov(ebp, esp).unwrap();
+    a.mov(eax, dword_ptr(ebp + 8)).unwrap();
+    a.mov(dword_ptr(0xf_0100), eax).unwrap();
+    a.pop(ebp).unwrap();
+    a.ret().unwrap();
+    let code = a.assemble(0x40_1000).unwrap();
+    let (mut cpu, mut mem) = setup(&code);
+    let t = Instant::now();
+    loop {
+        match cpu.run_slice(&mut mem, 2_000_000, 0).unwrap() {
+            Stop::Budget => continue,
+            Stop::ApiTrap { .. } => break,
+            s => panic!("{s:?}"),
+        }
+    }
+    let dt = t.elapsed().as_secs_f64();
+    let n = cpu.state().insns;
+    eprintln!("call/ret: {n} insns in {dt:.3}s = {:.0} MIPS, {} blocks", n as f64 / dt / 1e6, cpu.state().blocks);
+}

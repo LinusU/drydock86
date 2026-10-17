@@ -41,6 +41,29 @@ impl Session {
         Some((w, h, out))
     }
 
+    pub fn threads_info_static(&self) -> Vec<ThreadInfo> {
+        self.sched
+            .threads
+            .values()
+            .map(|t| ThreadInfo {
+                tid: t.tid,
+                state: match &t.state {
+                    crate::sched::ThreadState::Ready => "ready".into(),
+                    crate::sched::ThreadState::Resume { .. } => "resuming".into(),
+                    crate::sched::ThreadState::Blocked { api, block } => {
+                        format!("blocked in {} on {:?} until {:?}", self.thunks.name_of(*api), block.wait, block.deadline)
+                    }
+                    crate::sched::ThreadState::Terminated => format!("exited ({:?})", t.exit_code),
+                },
+                eip: t.regs.eip,
+                esp: t.regs.esp,
+                priority: t.priority,
+                frames: t.frames.len(),
+                internal: t.internal,
+            })
+            .collect()
+    }
+
     pub fn windows_info(&self) -> Vec<WindowInfo> {
         self.user
             .windows
