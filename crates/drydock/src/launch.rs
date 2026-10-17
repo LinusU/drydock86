@@ -75,6 +75,9 @@ pub struct RunArgs {
     /// Host pacing of the virtual clock.
     #[arg(long, value_enum, default_value_t = crate::driver::Pacing::Unthrottled)]
     pub pacing: crate::driver::Pacing,
+    /// Start from a checkpoint file instead of process start (same executable required).
+    #[arg(long)]
+    pub restore: Option<PathBuf>,
 }
 
 pub fn build_session(a: &RunArgs) -> Result<Session> {
@@ -112,7 +115,16 @@ pub fn build_session(a: &RunArgs) -> Result<Session> {
         cpu: Default::default(),
         env: Vec::new(),
     };
-    Session::new(config, vfs, registry).map_err(anyhow::Error::msg)
+    let mut s = Session::new(config, vfs, registry).map_err(anyhow::Error::msg)?;
+    if let Some(p) = &a.restore {
+        let cp = drydock_win32::checkpoint::Checkpoint::read_from(p).map_err(anyhow::Error::msg)?;
+        let sha = s.modules.get(s.process.exe_module).and_then(|m| m.sha256.clone());
+        if cp.info.exe_sha256 != sha {
+            bail!("{} was taken with a different executable ({:?}, this one is {:?})", p.display(), cp.info.exe_sha256, sha);
+        }
+        s.restore(&cp, true).map_err(anyhow::Error::msg)?;
+    }
+    Ok(s)
 }
 
 pub fn audio_sink(spec: &str) -> Result<Option<Box<dyn drydock_audio::AudioSink>>> {
