@@ -193,6 +193,7 @@ fn session_thread(args: RunArgs, rx: Receiver<ToSession>, tx: SyncSender<ToUi>, 
                     let now = d.s.clock.now_ns();
                     d.s.user.input.release_all(now);
                     let _ = d.s.vfs.persist();
+                    write_artifacts(&mut d, &args, &RunStop::Cancelled);
                     return;
                 }
                 Err(TryRecvError::Empty) => break,
@@ -200,13 +201,7 @@ fn session_thread(args: RunArgs, rx: Receiver<ToSession>, tx: SyncSender<ToUi>, 
         }
         let stop = d.advance(4_000_000, false);
         if args.seconds > 0.0 && d.s.clock.now_ns() as f64 / 1e9 >= args.seconds && args.play_limit {
-            let rep = crate::launch::report(&d, &stop);
-            let dir = args.artifacts.clone().unwrap_or_else(|| "local/artifacts/play".into());
-            let _ = std::fs::create_dir_all(&dir);
-            let _ = std::fs::write(dir.join("report.json"), serde_json::to_vec_pretty(&rep).unwrap_or_default());
-            if let Some((w, h, px)) = d.s.present_rgba() {
-                let _ = std::fs::write(dir.join("final.png"), drydock_win32::observe::encode_png(w, h, &px));
-            }
+            write_artifacts(&mut d, &args, &stop);
             let _ = tx.send(ToUi::Stopped("time limit reached".into()));
             let _ = proxy.send_event(());
             return;
@@ -226,15 +221,25 @@ fn session_thread(args: RunArgs, rx: Receiver<ToSession>, tx: SyncSender<ToUi>, 
                     Some(h) => format!("{other:?}: {} {}", h.reason, h.detail),
                     None => format!("{other:?}"),
                 };
-                let rep = crate::launch::report(&d, &other);
-                let dir = args.artifacts.clone().unwrap_or_else(|| "local/artifacts/play".into());
-                let _ = std::fs::create_dir_all(&dir);
-                let _ = std::fs::write(dir.join("report.json"), serde_json::to_vec_pretty(&rep).unwrap_or_default());
+                write_artifacts(&mut d, &args, &other);
                 let _ = tx.send(ToUi::Stopped(detail));
                 let _ = proxy.send_event(());
                 return;
             }
         }
+    }
+}
+
+/// Report, provenance (including the recorded input timeline) and the last frame.
+fn write_artifacts(d: &mut Driver, args: &RunArgs, stop: &RunStop) {
+    let dir = args.artifacts.clone().unwrap_or_else(|| "local/artifacts/play".into());
+    let _ = std::fs::create_dir_all(&dir);
+    let rep = crate::launch::report(d, stop);
+    let _ = std::fs::write(dir.join("report.json"), serde_json::to_vec_pretty(&rep).unwrap_or_default());
+    let prov = crate::launch::provenance(&d.s, args);
+    let _ = std::fs::write(dir.join("provenance.json"), serde_json::to_vec_pretty(&prov).unwrap_or_default());
+    if let Some((w, h, px)) = d.s.present_rgba() {
+        let _ = std::fs::write(dir.join("final.png"), drydock_win32::observe::encode_png(w, h, &px));
     }
 }
 
