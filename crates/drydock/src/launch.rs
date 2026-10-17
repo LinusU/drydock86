@@ -78,6 +78,23 @@ pub struct RunArgs {
     /// Start from a checkpoint file instead of process start (same executable required).
     #[arg(long)]
     pub restore: Option<PathBuf>,
+    /// Replay a recorded input timeline (a timeline file, or a run's provenance.json).
+    #[arg(long)]
+    pub replay_input: Option<PathBuf>,
+}
+
+/// Schedule every event of a recorded input timeline at its original virtual time.
+pub fn schedule_replay(s: &mut Session, path: &std::path::Path) -> Result<usize> {
+    let events = read_timeline(path)?;
+    let now = s.clock.now_ns();
+    let mut n = 0;
+    for e in events {
+        if e.at_ns >= now {
+            s.user.input.schedule(e.at_ns, e.ev);
+            n += 1;
+        }
+    }
+    Ok(n)
 }
 
 pub fn build_session(a: &RunArgs) -> Result<Session> {
@@ -229,6 +246,9 @@ pub fn run(a: RunArgs) -> Result<()> {
     }
     s.user.auto_dismiss_dialogs = a.auto_dismiss_dialogs;
     configure_host(&mut s, &a)?;
+    if let Some(p) = &a.replay_input {
+        schedule_replay(&mut s, p)?;
+    }
     let artifacts = a.artifacts.clone().unwrap_or_else(|| PathBuf::from("local/artifacts/last"));
     std::fs::create_dir_all(&artifacts)?;
     let mut d = crate::driver::Driver::new(s, a.pacing);
@@ -257,4 +277,11 @@ pub fn run(a: RunArgs) -> Result<()> {
         bail!("scenario failed");
     }
     Ok(())
+}
+
+/// Input timeline file contents (also accepted: a `provenance.json` with `input_timeline`).
+pub fn read_timeline(path: &std::path::Path) -> Result<Vec<drydock_win32::input::TimedInput>> {
+    let v: serde_json::Value = serde_json::from_slice(&std::fs::read(path)?)?;
+    let list = v.get("input_timeline").or_else(|| v.get("events")).cloned().unwrap_or(v);
+    Ok(serde_json::from_value(list)?)
 }

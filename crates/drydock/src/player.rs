@@ -166,6 +166,13 @@ fn session_thread(args: RunArgs, rx: Receiver<ToSession>, tx: SyncSender<ToUi>, 
         return;
     }
     s.user.auto_dismiss_dialogs = args.auto_dismiss_dialogs;
+    if let Some(p) = &args.replay_input
+        && let Err(e) = crate::launch::schedule_replay(&mut s, p)
+    {
+        let _ = tx.send(ToUi::Stopped(format!("{e:#}")));
+        let _ = proxy.send_event(());
+        return;
+    }
     let mut d = Driver::new(s, Pacing::Realtime);
     let mut last_frame = u64::MAX;
     let mut last_rel: Option<(i32, i32)> = None;
