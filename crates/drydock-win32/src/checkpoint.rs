@@ -197,6 +197,9 @@ impl Session {
             st.insns = cp.cpu.insns;
             st.tsc_time_base_ns = cp.cpu.tsc_time_base_ns;
             st.tsc_insn_base = cp.cpu.tsc_insn_base;
+            st.ns_per_insn_num = cp.config.cpu.ns_per_insn_num;
+            st.ns_per_insn_den = cp.config.cpu.ns_per_insn_den;
+            st.tsc_hz = cp.config.cpu.tsc_hz;
             st.stop = None;
             st.skip_breakpoint = None;
         }
