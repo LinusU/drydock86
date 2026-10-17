@@ -3,6 +3,7 @@
 use crate::api::{Conv, Handler};
 use rustc_hash::FxHashMap;
 use serde::{Deserialize, Serialize};
+use std::sync::Arc;
 
 /// Bytes per thunk slot. Only the first two (`int 0x2e`) are executed.
 pub const THUNK_SIZE: u32 = 4;
@@ -15,12 +16,19 @@ pub struct ThunkInfo {
     pub ordinal: u16,
     pub conv: Conv,
     pub handler: Option<Handler>,
+    /// `MODULE!Name`, computed once (it labels every call in traces and counts).
+    pub full: Arc<str>,
 }
 
 impl ThunkInfo {
+    pub fn new(module: String, name: String, ordinal: u16, conv: Conv, handler: Option<Handler>) -> ThunkInfo {
+        let m = module.trim_end_matches(".dll").trim_end_matches(".DLL");
+        let full = format!("{m}!{name}").into();
+        ThunkInfo { module, name, ordinal, conv, handler, full }
+    }
+
     pub fn full_name(&self) -> String {
-        let m = self.module.trim_end_matches(".dll").trim_end_matches(".DLL");
-        format!("{m}!{}", self.name)
+        self.full.to_string()
     }
 }
 

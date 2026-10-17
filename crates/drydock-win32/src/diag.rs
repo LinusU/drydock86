@@ -10,7 +10,7 @@ use std::collections::{BTreeMap, VecDeque};
 pub struct ApiTraceEntry {
     pub t_ns: u64,
     pub tid: u32,
-    pub api: String,
+    pub api: std::sync::Arc<str>,
     pub args: Vec<u32>,
     pub caller: u32,
     pub ret: Option<u32>,
@@ -80,7 +80,7 @@ pub struct Diagnostics {
     pub trace: Option<VecDeque<ApiTraceEntry>>,
     pub trace_cap: usize,
     pub trace_filter: TraceFilter,
-    pub api_counts: BTreeMap<String, u64>,
+    pub api_counts: rustc_hash::FxHashMap<std::sync::Arc<str>, u64>,
     pub missing: BTreeMap<String, u64>,
     pub debug_output: VecDeque<String>,
     /// Explicit debugger mutations (memory/register writes) performed in this session.
@@ -98,7 +98,7 @@ impl Default for Diagnostics {
             trace: None,
             trace_cap: 0,
             trace_filter: TraceFilter::default(),
-            api_counts: BTreeMap::new(),
+            api_counts: Default::default(),
             missing: BTreeMap::new(),
             debug_output: VecDeque::new(),
             mutations: Vec::new(),

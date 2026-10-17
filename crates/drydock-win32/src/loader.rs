@@ -210,13 +210,7 @@ pub fn load_builtin(s: &mut Session, name: &'static str) -> Result<u32, String> 
         sp += ex.name.len() as u32 + 1;
         s.thunks.insert(
             base + thunk,
-            ThunkInfo {
-                module: name.to_string(),
-                name: ex.name.to_string(),
-                ordinal: ord,
-                conv: ex.conv,
-                handler: ex.handler,
-            },
+            ThunkInfo::new(name.to_string(), ex.name.to_string(), ord, ex.conv, ex.handler),
         );
         entries.push(Export {
             ordinal: ord,
@@ -291,13 +285,7 @@ fn dynamic_stub(s: &mut Session, base: u32, name: &str, ordinal: u16) -> Result<
     let module = m.exports.dll_name.clone();
     s.thunks.insert(
         addr,
-        ThunkInfo {
-            module,
-            name: name.to_string(),
-            ordinal,
-            conv: Conv::Stdcall(0),
-            handler: None,
-        },
+        ThunkInfo::new(module, name.to_string(), ordinal, Conv::Stdcall(0), None),
     );
     Ok(addr)
 }

@@ -97,7 +97,7 @@ fn rebind(records: &[ThunkRecord], specials: [u32; 3]) -> Result<Thunks, String>
         };
         t.insert(
             r.addr,
-            ThunkInfo { module: r.module.clone(), name: r.name.clone(), ordinal: r.ordinal, conv: r.conv, handler },
+            ThunkInfo::new(r.module.clone(), r.name.clone(), r.ordinal, r.conv, handler),
         );
     }
     [t.callback_ret, t.thread_exit, t.thread_start] = specials;

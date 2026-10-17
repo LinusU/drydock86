@@ -497,8 +497,8 @@ impl Session {
             );
             return None;
         };
-        let name = info.full_name();
         if !self.host.api_breaks.is_empty()
+            && let name = info.full_name()
             && self
                 .host
                 .api_breaks
@@ -520,9 +520,10 @@ impl Session {
     }
 
     pub fn dispatch(&mut self, thunk: u32) {
-        let info = self.thunks.get(thunk).unwrap().clone();
+        let info = self.thunks.get(thunk).unwrap();
+        let (conv, handler, full) = (info.conv, info.handler, info.full.clone());
         self.clock.charge_ns(API_COST_NS);
-        let nargs = match info.conv {
+        let nargs = match conv {
             Conv::Stdcall(n) => n as usize,
             Conv::Cdecl => 4,
         };
@@ -533,14 +534,14 @@ impl Session {
         self.diag.record_call(ApiTraceEntry {
             t_ns: self.clock.now_ns(),
             tid: self.tid(),
-            api: info.full_name(),
+            api: full.clone(),
             args,
             caller: self.caller(),
             ret: None,
         });
-        let r = match info.handler {
+        let r = match handler {
             Some(h) => h(self),
-            None => Err(ApiError::Unimplemented(info.full_name())),
+            None => Err(ApiError::Unimplemented(full.to_string())),
         };
         self.finish_api(thunk, r);
     }
