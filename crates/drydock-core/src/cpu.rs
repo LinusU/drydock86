@@ -693,6 +693,21 @@ impl Cpu {
         };
     }
 
+    /// Pages (4 KiB page numbers) that have held translated code since the last full flush.
+    pub fn code_pages(&self) -> Vec<u32> {
+        let bits = &self.uc.get_data().code_pages;
+        let mut out = Vec::new();
+        for (w, &word) in bits.iter().enumerate() {
+            let mut x = word;
+            while x != 0 {
+                let b = x.trailing_zeros();
+                out.push((w as u32) << 6 | b);
+                x &= x - 1;
+            }
+        }
+        out
+    }
+
     /// Flush every translated block (after restoring memory from a checkpoint).
     pub fn flush_all_code(&mut self) -> Result<(), String> {
         self.uc.ctl_flush_tb().map_err(uc_err)?;

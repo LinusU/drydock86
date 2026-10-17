@@ -208,6 +208,20 @@ pub fn provenance(s: &Session, a: &RunArgs) -> serde_json::Value {
     })
 }
 
+/// Where translated code lives (writes to these pages are slow in the JIT).
+fn code_pages_by_region(s: &Session) -> Vec<serde_json::Value> {
+    let mut by: std::collections::BTreeMap<(u32, String), u32> = Default::default();
+    for p in s.cpu.code_pages() {
+        let addr = p << 12;
+        let key = match s.mem.region_at(addr) {
+            Some(r) => (r.base, r.tag.clone()),
+            None => (addr, "unmapped".into()),
+        };
+        *by.entry(key).or_default() += 1;
+    }
+    by.into_iter().map(|((base, tag), n)| serde_json::json!({ "base": base, "tag": tag, "pages": n })).collect()
+}
+
 fn top_apis(s: &Session) -> Vec<serde_json::Value> {
     let mut v: Vec<_> = s.diag.api_counts.iter().collect();
     v.sort_by(|a, b| b.1.cmp(a.1));
@@ -237,6 +251,7 @@ pub fn report(d: &crate::driver::Driver, stop: &RunStop) -> serde_json::Value {
         "run_stats": s.stats,
         "threads": d.s.threads_info_static(),
         "audio": d.s.audio_info(),
+        "code_pages_by_region": code_pages_by_region(s),
         "trace": s.diag.trace,
     })
 }
