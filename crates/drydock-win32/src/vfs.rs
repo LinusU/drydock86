@@ -368,9 +368,7 @@ impl Vfs {
 
     pub fn attributes(&self, p: &GuestPath) -> VfsResult<u32> {
         match self.node(p) {
-            Some(Node::HostDir(_) | Node::VirtualDir | Node::OverlayDir) => {
-                Ok(FILE_ATTRIBUTE_DIRECTORY)
-            }
+            Some(Node::HostDir(_) | Node::VirtualDir | Node::OverlayDir) => Ok(FILE_ATTRIBUTE_DIRECTORY),
             Some(Node::HostFile(..)) => Ok(FILE_ATTRIBUTE_ARCHIVE),
             Some(Node::OverlayFile(k)) => match &self.overlay[&k] {
                 OverlayNode::File { attrs, .. } => Ok(*attrs),
@@ -390,9 +388,7 @@ impl Vfs {
                 mtime: self.base_file_time,
             }),
             Some(Node::OverlayFile(k)) => match &self.overlay[&k] {
-                OverlayNode::File {
-                    data, attrs, mtime, ..
-                } => Ok(DirEntry {
+                OverlayNode::File { data, attrs, mtime, .. } => Ok(DirEntry {
                     name,
                     attrs: *attrs,
                     size: data.len() as u64,
@@ -428,10 +424,7 @@ impl Vfs {
         let parent_ok = p.parent().map(|par| self.exists_dir(&par)).unwrap_or(true);
         let node = self.node(p);
         let existed = node.is_some();
-        if matches!(
-            node,
-            Some(Node::HostDir(_) | Node::VirtualDir | Node::OverlayDir)
-        ) {
+        if matches!(node, Some(Node::HostDir(_) | Node::VirtualDir | Node::OverlayDir)) {
             return Err(VfsError::IsDirectory);
         }
         match (disp, existed) {
@@ -448,8 +441,7 @@ impl Vfs {
         if !existed && !parent_ok {
             return Err(VfsError::PathNotFound);
         }
-        let truncate = matches!(disp, Disposition::CreateAlways | Disposition::TruncateExisting)
-            || (!existed);
+        let truncate = matches!(disp, Disposition::CreateAlways | Disposition::TruncateExisting) || (!existed);
         let key = p.key();
         let needs_overlay = write || truncate;
         let backing = if needs_overlay {
@@ -766,13 +758,10 @@ impl Vfs {
         let manifest = dir.join("overlay.json");
         if manifest.exists() {
             let m: BTreeMap<String, OverlayNode> =
-                serde_json::from_slice(&std::fs::read(&manifest)?)
-                    .map_err(|e| std::io::Error::other(e.to_string()))?;
+                serde_json::from_slice(&std::fs::read(&manifest)?).map_err(|e| std::io::Error::other(e.to_string()))?;
             for (k, n) in m {
                 let n = match n {
-                    OverlayNode::File {
-                        name, attrs, mtime, ..
-                    } => {
+                    OverlayNode::File { name, attrs, mtime, .. } => {
                         let data = std::fs::read(dir.join("files").join(hex::encode(&k)))?;
                         OverlayNode::File {
                             name,
@@ -919,10 +908,7 @@ mod tests {
         );
         v.delete(&p).unwrap();
         assert!(v.attributes(&p).is_err());
-        assert_eq!(
-            v.list_dir(&normalize("C:\\", &cwd()).unwrap())[0].name,
-            "Game"
-        );
+        assert_eq!(v.list_dir(&normalize("C:\\", &cwd()).unwrap())[0].name, "Game");
         let _ = std::fs::remove_dir_all(&dir);
     }
 }

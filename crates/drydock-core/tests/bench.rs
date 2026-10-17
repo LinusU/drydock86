@@ -6,13 +6,23 @@ use std::time::Instant;
 
 fn setup(code: &[u8]) -> (Cpu, AddressSpace) {
     let mut mem = AddressSpace::new();
-    mem.alloc(Some(0x40_0000), 0x10000, RegionKind::Image, PAGE_EXECUTE_READWRITE, "code").unwrap();
-    mem.alloc(Some(0xf_0000), 0x10000, RegionKind::Private, PAGE_READWRITE, "stack").unwrap();
-    mem.alloc(Some(GDT_BASE), 0x1000, RegionKind::System, PAGE_READWRITE, "gdt").unwrap();
+    mem.alloc(
+        Some(0x40_0000),
+        0x10000,
+        RegionKind::Image,
+        PAGE_EXECUTE_READWRITE,
+        "code",
+    )
+    .unwrap();
+    mem.alloc(Some(0xf_0000), 0x10000, RegionKind::Private, PAGE_READWRITE, "stack")
+        .unwrap();
+    mem.alloc(Some(GDT_BASE), 0x1000, RegionKind::System, PAGE_READWRITE, "gdt")
+        .unwrap();
     mem.write_force(0x40_1000, code).unwrap();
     let mut cpu = Cpu::new().unwrap();
     cpu.setup_gdt(&mut mem).unwrap();
-    cpu.write_regs(&mut mem, &Regs::initial(0x40_1000, 0xf_fff0, 0)).unwrap();
+    cpu.write_regs(&mut mem, &Regs::initial(0x40_1000, 0xf_fff0, 0))
+        .unwrap();
     (cpu, mem)
 }
 
@@ -47,7 +57,11 @@ fn bench_tight_loop() {
     }
     let dt = t.elapsed().as_secs_f64();
     let n = cpu.state().insns;
-    eprintln!("tight loop: {n} insns in {dt:.3}s = {:.0} MIPS ({slices} slices, {} blocks)", n as f64 / dt / 1e6, cpu.state().blocks);
+    eprintln!(
+        "tight loop: {n} insns in {dt:.3}s = {:.0} MIPS ({slices} slices, {} blocks)",
+        n as f64 / dt / 1e6,
+        cpu.state().blocks
+    );
 }
 
 #[test]
@@ -73,7 +87,9 @@ fn bench_api_trap_roundtrip() {
     loop {
         match cpu.run_slice(&mut mem, u64::MAX / 2, 0).unwrap() {
             Stop::ApiTrap { eip } => {
-                if cpu.reg(drydock_core::Reg::ESI) == 0 { break; }
+                if cpu.reg(drydock_core::Reg::ESI) == 0 {
+                    break;
+                }
                 // stdcall ret 4
                 let stack_ptr = cpu.esp();
                 let ret = mem.read_u32(stack_ptr).unwrap();
@@ -86,7 +102,10 @@ fn bench_api_trap_roundtrip() {
         }
     }
     let dt = t.elapsed().as_secs_f64();
-    eprintln!("api trap: {traps} round trips in {dt:.3}s = {:.2} us each", dt * 1e6 / traps as f64);
+    eprintln!(
+        "api trap: {traps} round trips in {dt:.3}s = {:.2} us each",
+        dt * 1e6 / traps as f64
+    );
 }
 
 #[test]
@@ -123,5 +142,9 @@ fn bench_call_ret_and_stores() {
     }
     let dt = t.elapsed().as_secs_f64();
     let n = cpu.state().insns;
-    eprintln!("call/ret: {n} insns in {dt:.3}s = {:.0} MIPS, {} blocks", n as f64 / dt / 1e6, cpu.state().blocks);
+    eprintln!(
+        "call/ret: {n} insns in {dt:.3}s = {:.0} MIPS, {} blocks",
+        n as f64 / dt / 1e6,
+        cpu.state().blocks
+    );
 }

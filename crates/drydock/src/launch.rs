@@ -107,11 +107,23 @@ pub fn schedule_replay(s: &mut Session, path: &std::path::Path) -> Result<usize>
 }
 
 pub fn build_session(a: &RunArgs) -> Result<Session> {
-    let root = a.root.canonicalize().with_context(|| format!("root {}", a.root.display()))?;
-    let base = GuestPath { drive: 'C', comps: vec![] };
+    let root = a
+        .root
+        .canonicalize()
+        .with_context(|| format!("root {}", a.root.display()))?;
+    let base = GuestPath {
+        drive: 'C',
+        comps: vec![],
+    };
     let mount = vfs::normalize(&a.mount, &base).context("bad --mount")?;
-    let exe_host = if a.exe.is_absolute() { a.exe.clone() } else { root.join(&a.exe) };
-    let exe_host = exe_host.canonicalize().with_context(|| format!("exe {}", exe_host.display()))?;
+    let exe_host = if a.exe.is_absolute() {
+        a.exe.clone()
+    } else {
+        root.join(&a.exe)
+    };
+    let exe_host = exe_host
+        .canonicalize()
+        .with_context(|| format!("exe {}", exe_host.display()))?;
     let rel = exe_host.strip_prefix(&root).context("--exe must be inside --root")?;
     let mut guest_exe = mount.clone();
     for c in rel.components() {
@@ -150,7 +162,12 @@ pub fn build_session(a: &RunArgs) -> Result<Session> {
         let cp = drydock_win32::checkpoint::Checkpoint::read_from(p).map_err(anyhow::Error::msg)?;
         let sha = s.modules.get(s.process.exe_module).and_then(|m| m.sha256.clone());
         if cp.info.exe_sha256 != sha {
-            bail!("{} was taken with a different executable ({:?}, this one is {:?})", p.display(), cp.info.exe_sha256, sha);
+            bail!(
+                "{} was taken with a different executable ({:?}, this one is {:?})",
+                p.display(),
+                cp.info.exe_sha256,
+                sha
+            );
         }
         s.restore(&cp, true).map_err(anyhow::Error::msg)?;
     }
@@ -232,7 +249,9 @@ fn code_pages_by_region(s: &Session) -> Vec<serde_json::Value> {
         };
         *by.entry(key).or_default() += 1;
     }
-    by.into_iter().map(|((base, tag), n)| serde_json::json!({ "base": base, "tag": tag, "pages": n })).collect()
+    by.into_iter()
+        .map(|((base, tag), n)| serde_json::json!({ "base": base, "tag": tag, "pages": n }))
+        .collect()
 }
 
 /// User plus system CPU time of this process (steadier than wall time on a busy host).
@@ -292,7 +311,10 @@ pub fn run(a: RunArgs) -> Result<()> {
     if let Some(p) = &a.replay_input {
         schedule_replay(&mut s, p)?;
     }
-    let artifacts = a.artifacts.clone().unwrap_or_else(|| PathBuf::from("local/artifacts/last"));
+    let artifacts = a
+        .artifacts
+        .clone()
+        .unwrap_or_else(|| PathBuf::from("local/artifacts/last"));
     std::fs::create_dir_all(&artifacts)?;
     let mut d = crate::driver::Driver::new(s, a.pacing);
     let (stop, scenario_log, ok) = if let Some(sp) = &a.scenario {
@@ -313,7 +335,10 @@ pub fn run(a: RunArgs) -> Result<()> {
     std::fs::write(artifacts.join("report.json"), serde_json::to_vec_pretty(&rep)?)?;
     std::fs::write(artifacts.join("provenance.json"), serde_json::to_vec_pretty(&prov)?)?;
     if let Some((w, h, px)) = d.s.capture_front() {
-        std::fs::write(artifacts.join("final.png"), drydock_win32::observe::encode_png(w, h, &px))?;
+        std::fs::write(
+            artifacts.join("final.png"),
+            drydock_win32::observe::encode_png(w, h, &px),
+        )?;
     }
     println!("{}", serde_json::to_string_pretty(&rep)?);
     if d.s.diag.halt.is_some() {
@@ -328,6 +353,10 @@ pub fn run(a: RunArgs) -> Result<()> {
 /// Input timeline file contents (also accepted: a `provenance.json` with `input_timeline`).
 pub fn read_timeline(path: &std::path::Path) -> Result<Vec<drydock_win32::input::TimedInput>> {
     let v: serde_json::Value = serde_json::from_slice(&std::fs::read(path)?)?;
-    let list = v.get("input_timeline").or_else(|| v.get("events")).cloned().unwrap_or(v);
+    let list = v
+        .get("input_timeline")
+        .or_else(|| v.get("events"))
+        .cloned()
+        .unwrap_or(v);
     Ok(serde_json::from_value(list)?)
 }

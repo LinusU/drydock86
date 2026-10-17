@@ -16,9 +16,7 @@ use crate::mem::{AddressSpace, MapOp, protect_to_uc};
 use rustc_hash::FxHashMap;
 use serde::{Deserialize, Serialize};
 use std::ffi::c_void;
-use unicorn_engine::{
-    Arch, HookType, MemType, Mode, Prot, RegisterX86 as R, Unicorn, X86CpuModel, uc_error,
-};
+use unicorn_engine::{Arch, HookType, MemType, Mode, Prot, RegisterX86 as R, Unicorn, X86CpuModel, uc_error};
 
 /// Interrupt vector used by runtime thunks to enter Rust.
 pub const API_TRAP_VECTOR: u32 = 0x2e;
@@ -51,10 +49,19 @@ pub struct Fault {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub enum Stop {
     /// `int 0x2e` executed; `eip` is the address *after* the trap instruction.
-    ApiTrap { eip: u32 },
+    ApiTrap {
+        eip: u32,
+    },
     Budget,
-    Breakpoint { addr: u32 },
-    Watchpoint { addr: u32, size: u32, write: bool, eip: u32 },
+    Breakpoint {
+        addr: u32,
+    },
+    Watchpoint {
+        addr: u32,
+        size: u32,
+        write: bool,
+        eip: u32,
+    },
     Fault(Fault),
     /// Stop requested from outside guest execution (e.g. cancellation).
     Requested,
@@ -203,8 +210,7 @@ impl Cpu {
             blocks: 0,
         };
         let mut uc = Unicorn::new_with_data(Arch::X86, Mode::MODE_32, hs).map_err(uc_err)?;
-        uc.ctl_set_cpu_model(X86CpuModel::PENTIUM3 as i32)
-            .map_err(uc_err)?;
+        uc.ctl_set_cpu_model(X86CpuModel::PENTIUM3 as i32).map_err(uc_err)?;
 
         uc.add_block_hook(1, 0, |uc, addr, size| {
             let st = uc.get_data_mut();
@@ -307,7 +313,11 @@ impl Cpu {
         })
         .map_err(uc_err)?;
 
-        let mut cpu = Cpu { uc, rdtsc_hook: 0, fs_base: 0 };
+        let mut cpu = Cpu {
+            uc,
+            rdtsc_hook: 0,
+            fs_base: 0,
+        };
         cpu.install_rdtsc_hook()?;
         Ok(cpu)
     }
@@ -463,11 +473,7 @@ impl Cpu {
         for (i, s) in st.iter_mut().enumerate() {
             let mut buf = [0u8; 16];
             unsafe {
-                unicorn_engine::uc_reg_read(
-                    self.uc.get_handle(),
-                    R::FP0 as i32 + i as i32,
-                    buf.as_mut_ptr().cast(),
-                );
+                unicorn_engine::uc_reg_read(self.uc.get_handle(), R::FP0 as i32 + i as i32, buf.as_mut_ptr().cast());
             }
             s.copy_from_slice(&buf[..10]);
         }
@@ -475,11 +481,7 @@ impl Cpu {
         for (i, x) in xmm.iter_mut().enumerate() {
             let mut buf = [0u8; 16];
             unsafe {
-                unicorn_engine::uc_reg_read(
-                    self.uc.get_handle(),
-                    R::XMM0 as i32 + i as i32,
-                    buf.as_mut_ptr().cast(),
-                );
+                unicorn_engine::uc_reg_read(self.uc.get_handle(), R::XMM0 as i32 + i as i32, buf.as_mut_ptr().cast());
             }
             x.copy_from_slice(&buf);
         }
@@ -544,12 +546,7 @@ impl Cpu {
     ///
     /// `insn_budget` bounds the number of instructions (checked at block boundaries).
     /// `time_base_ns` is the virtual time at the start of the slice, used by RDTSC.
-    pub fn run_slice(
-        &mut self,
-        mem: &mut AddressSpace,
-        insn_budget: u64,
-        time_base_ns: u64,
-    ) -> Result<Stop, String> {
+    pub fn run_slice(&mut self, mem: &mut AddressSpace, insn_budget: u64, time_base_ns: u64) -> Result<Stop, String> {
         self.flush_mem_ops(mem)?;
         let eip = self.eip();
         {
@@ -612,18 +609,14 @@ impl Cpu {
             .map_err(uc_err)?;
         self.uc.get_data_mut().breakpoints.insert(addr, id);
         // Existing translations of this address must be regenerated with the hook.
-        self.uc
-            .ctl_remove_cache(addr as u64, addr as u64 + 1)
-            .map_err(uc_err)?;
+        self.uc.ctl_remove_cache(addr as u64, addr as u64 + 1).map_err(uc_err)?;
         Ok(())
     }
 
     pub fn remove_breakpoint(&mut self, addr: u32) -> Result<bool, String> {
         if let Some(id) = self.uc.get_data_mut().breakpoints.remove(&addr) {
             self.uc.remove_hook(id).map_err(uc_err)?;
-            self.uc
-                .ctl_remove_cache(addr as u64, addr as u64 + 1)
-                .map_err(uc_err)?;
+            self.uc.ctl_remove_cache(addr as u64, addr as u64 + 1).map_err(uc_err)?;
             Ok(true)
         } else {
             Ok(false)

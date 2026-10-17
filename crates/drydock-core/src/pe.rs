@@ -214,9 +214,7 @@ impl PeImage {
         for i in 0..nsections {
             let o = sh + i * 40;
             let raw = file.get(o..o + 8).ok_or(PeError::Truncated(o))?;
-            let name = String::from_utf8_lossy(raw)
-                .trim_end_matches('\0')
-                .to_string();
+            let name = String::from_utf8_lossy(raw).trim_end_matches('\0').to_string();
             sections.push(Section {
                 name,
                 virtual_size: u32_at(file, o + 8)?,

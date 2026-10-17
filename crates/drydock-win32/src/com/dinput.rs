@@ -248,7 +248,14 @@ fn dev_mut(s: &mut Session, id: u32) -> &mut DiDevice {
 fn objects(k: DevKind) -> Vec<Obj> {
     match k {
         DevKind::Keyboard => (1..256).filter(|&i| key_exists(i)).map(Obj::Key).collect(),
-        DevKind::Mouse => vec![Obj::Axis(0), Obj::Axis(1), Obj::Axis(2), Obj::Button(0), Obj::Button(1), Obj::Button(2)],
+        DevKind::Mouse => vec![
+            Obj::Axis(0),
+            Obj::Axis(1),
+            Obj::Axis(2),
+            Obj::Button(0),
+            Obj::Button(1),
+            Obj::Button(2),
+        ],
         DevKind::Joystick => {
             let mut v = vec![Obj::Axis(0), Obj::Axis(1), Obj::Axis(2), Obj::Axis(5)];
             v.extend((0..8).map(Obj::Button));
@@ -317,7 +324,10 @@ fn dev_set_data_format(s: &mut Session) -> ApiResult {
                 return false;
             }
             let ot = obj_type(**ob, d.rel_axes);
-            let type_ok = (tybits & 0x3 != 0 && ot & 0x3 != 0) || (tybits & 0xc != 0 && ot & 0xc != 0) || (tybits & 0x10 != 0 && ot & 0x10 != 0) || tybits == 0;
+            let type_ok = (tybits & 0x3 != 0 && ot & 0x3 != 0)
+                || (tybits & 0xc != 0 && ot & 0xc != 0)
+                || (tybits & 0x10 != 0 && ot & 0x10 != 0)
+                || tybits == 0;
             type_ok && (any || (ot >> 8) & 0xffff == inst)
         });
         match found {
@@ -336,7 +346,11 @@ fn dev_set_data_format(s: &mut Session) -> ApiResult {
     let dm = dev_mut(s, id);
     dm.format = fmt;
     dm.data_size = data_size;
-    dm.rel_axes = if dm.kind == DevKind::Mouse { flags & 1 == 0 } else { flags & 2 != 0 };
+    dm.rel_axes = if dm.kind == DevKind::Mouse {
+        flags & 1 == 0
+    } else {
+        flags & 2 != 0
+    };
     Ok(ApiRet::Ret(DI_OK))
 }
 
@@ -415,13 +429,25 @@ fn obj_value(s: &Session, d: &mut DiDevice, o: Obj) -> u32 {
                 }
             }
         }
-        (DevKind::Mouse, Obj::Button(b)) => if inp.buttons & (1 << b) != 0 { 0x80 } else { 0 },
+        (DevKind::Mouse, Obj::Button(b)) => {
+            if inp.buttons & (1 << b) != 0 {
+                0x80
+            } else {
+                0
+            }
+        }
         (DevKind::Joystick, Obj::Axis(a)) => {
             let raw = inp.joy_axes[(a as usize).min(3)] as i64;
             let (lo, hi) = d.ranges[(a as usize).min(3)];
             (lo as i64 + raw * (hi as i64 - lo as i64) / 65535) as u32
         }
-        (DevKind::Joystick, Obj::Button(b)) => if inp.joy_buttons & (1 << b) != 0 { 0x80 } else { 0 },
+        (DevKind::Joystick, Obj::Button(b)) => {
+            if inp.joy_buttons & (1 << b) != 0 {
+                0x80
+            } else {
+                0
+            }
+        }
         (DevKind::Joystick, Obj::Pov(_)) => 0xffff_ffff,
         _ => 0,
     }
@@ -460,7 +486,10 @@ fn vk_for_dik(scan: u16, ext: bool) -> u8 {
         (0x52, false) => 0x60,
         (0x53, false) => 0x6e,
         _ => (1..=255u8)
-            .find(|&v| crate::input::vk_to_scan(v) == scan && !matches!(v, 0x10..=0x12 | 0x60..=0x6f | 0x21..=0x28 | 0x2d | 0x2e))
+            .find(|&v| {
+                crate::input::vk_to_scan(v) == scan
+                    && !matches!(v, 0x10..=0x12 | 0x60..=0x6f | 0x21..=0x28 | 0x2d | 0x2e)
+            })
             .unwrap_or(0),
     }
 }
@@ -611,7 +640,9 @@ fn dev_get_property(s: &mut Session) -> ApiResult {
             s.mem.write_u32(ph + 16, lo as u32)?;
             s.mem.write_u32(ph + 20, hi as u32)?;
         }
-        5 | 6 => s.mem.write_u32(ph + 16, d.deadzone[prop_obj(&d, how, obj).unwrap_or(0)])?,
+        5 | 6 => s
+            .mem
+            .write_u32(ph + 16, d.deadzone[prop_obj(&d, how, obj).unwrap_or(0)])?,
         _ => return Ok(ApiRet::Ret(DIERR_UNSUPPORTED)),
     }
     Ok(ApiRet::Ret(DI_OK))
@@ -622,7 +653,10 @@ fn dev_get_capabilities(s: &mut Session) -> ApiResult {
     let (_id, d) = dev_self(s)?;
     let objs = objects(d.kind);
     let axes = objs.iter().filter(|o| matches!(o, Obj::Axis(_))).count() as u32;
-    let buttons = objs.iter().filter(|o| matches!(o, Obj::Button(_) | Obj::Key(_))).count() as u32;
+    let buttons = objs
+        .iter()
+        .filter(|o| matches!(o, Obj::Button(_) | Obj::Key(_)))
+        .count() as u32;
     let povs = objs.iter().filter(|o| matches!(o, Obj::Pov(_))).count() as u32;
     let size = s.mem.read_u32(p)?.clamp(4, 44);
     let mut b = vec![0u8; size as usize];
@@ -647,7 +681,9 @@ fn object_instance(o: Obj, rel: bool, ofs: u32, size: u32) -> Vec<u8> {
         Obj::Axis(2) => "Wheel".to_string(),
         Obj::Axis(_) => "Rz-axis".to_string(),
         Obj::Button(n) => format!("Button {n}"),
-        Obj::Key(k) => crate::input::scan_name((k & 0x7f) as u16, k & 0x80 != 0).unwrap_or("Key").to_string(),
+        Obj::Key(k) => crate::input::scan_name((k & 0x7f) as u16, k & 0x80 != 0)
+            .unwrap_or("Key")
+            .to_string(),
         Obj::Pov(_) => "POV".to_string(),
     };
     let n = name.as_bytes();
@@ -667,7 +703,10 @@ fn dev_enum_objects(s: &mut Session) -> ApiResult {
             continue;
         }
         let ofs = d.format.iter().find(|f| f.obj == o).map(|f| f.ofs).unwrap_or(0);
-        items.push(vec![CallArg::Buf(object_instance(o, d.rel_axes, ofs, 316)), CallArg::Val(ctx)]);
+        items.push(vec![
+            CallArg::Buf(object_instance(o, d.rel_axes, ofs, 316)),
+            CallArg::Val(ctx),
+        ]);
     }
     enum_callbacks(cb, items, 0, DI_OK)
 }
@@ -756,7 +795,12 @@ pub fn on_input(s: &mut Session, at_ns: u64, ev: &InputEvent) {
             }
         };
         match (d.kind, ev) {
-            (DevKind::Keyboard, InputEvent::Key { scan, extended, down, .. }) => {
+            (
+                DevKind::Keyboard,
+                InputEvent::Key {
+                    scan, extended, down, ..
+                },
+            ) => {
                 let dik = (*scan as u32 & 0x7f) | if *extended { 0x80 } else { 0 };
                 push(d, Obj::Key(dik), if *down { 0x80 } else { 0 });
             }

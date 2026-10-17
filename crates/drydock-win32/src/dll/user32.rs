@@ -323,7 +323,15 @@ impl Default for UserState {
 pub fn supported_modes(refresh: u32) -> Vec<DisplayMode> {
     let mut v = Vec::new();
     for bpp in [8, 16, 32] {
-        for (w, h) in [(640, 480), (800, 600), (1024, 768), (1152, 864), (1280, 960), (1280, 1024), (1600, 1200)] {
+        for (w, h) in [
+            (640, 480),
+            (800, 600),
+            (1024, 768),
+            (1152, 864),
+            (1280, 960),
+            (1280, 1024),
+            (1600, 1200),
+        ] {
             v.push(DisplayMode {
                 width: w,
                 height: h,
@@ -387,38 +395,38 @@ fn get_system_metrics(s: &mut Session) -> ApiResult {
     let [i] = s.args::<1>()?;
     let m = s.user.mode;
     let v: i32 = match i {
-        0 => m.width as i32,   // SM_CXSCREEN
-        1 => m.height as i32,  // SM_CYSCREEN
-        2 => 16,               // SM_CXVSCROLL
-        3 => 16,               // SM_CYHSCROLL
-        4 => CYCAPTION,        // SM_CYCAPTION
-        5 | 6 => CXBORDER,     // SM_CXBORDER / SM_CYBORDER
-        7 | 8 => CXDLGFRAME,   // SM_CXDLGFRAME
-        11 | 12 => 32,         // SM_CXICON
-        13 | 14 => 32,         // SM_CXCURSOR
-        15 => CYMENU,          // SM_CYMENU
-        16 => m.width as i32,  // SM_CXFULLSCREEN
+        0 => m.width as i32,  // SM_CXSCREEN
+        1 => m.height as i32, // SM_CYSCREEN
+        2 => 16,              // SM_CXVSCROLL
+        3 => 16,              // SM_CYHSCROLL
+        4 => CYCAPTION,       // SM_CYCAPTION
+        5 | 6 => CXBORDER,    // SM_CXBORDER / SM_CYBORDER
+        7 | 8 => CXDLGFRAME,  // SM_CXDLGFRAME
+        11 | 12 => 32,        // SM_CXICON
+        13 | 14 => 32,        // SM_CXCURSOR
+        15 => CYMENU,         // SM_CYMENU
+        16 => m.width as i32, // SM_CXFULLSCREEN
         17 => m.height as i32 - CYCAPTION,
-        19 => 1,               // SM_MOUSEPRESENT
-        23 => 0,               // SM_SWAPBUTTON
-        28 | 29 => 112,        // SM_CXMIN / SM_CYMIN
-        30 | 31 => 18,         // SM_CXSIZE
-        32 | 33 => CXFRAME,    // SM_CXFRAME
-        36 | 37 => 4,          // SM_CXDOUBLECLK
-        42 => 0,               // SM_DBCSENABLED
-        43 => 3,               // SM_CMOUSEBUTTONS
-        45 | 46 => CXEDGE,     // SM_CXEDGE
-        49 | 50 => 16,         // SM_CXSMICON
+        19 => 1,            // SM_MOUSEPRESENT
+        23 => 0,            // SM_SWAPBUTTON
+        28 | 29 => 112,     // SM_CXMIN / SM_CYMIN
+        30 | 31 => 18,      // SM_CXSIZE
+        32 | 33 => CXFRAME, // SM_CXFRAME
+        36 | 37 => 4,       // SM_CXDOUBLECLK
+        42 => 0,            // SM_DBCSENABLED
+        43 => 3,            // SM_CMOUSEBUTTONS
+        45 | 46 => CXEDGE,  // SM_CXEDGE
+        49 | 50 => 16,      // SM_CXSMICON
         59 | 60 => m.width.max(m.height) as i32 + 8,
-        61 => m.width as i32,  // SM_CXMAXIMIZED
+        61 => m.width as i32, // SM_CXMAXIMIZED
         62 => m.height as i32,
-        63 => 1,               // SM_NETWORK
-        67 => 0,               // SM_CLEANBOOT
-        75 => 1,               // SM_MOUSEWHEELPRESENT
-        76 | 77 => 0,          // SM_XVIRTUALSCREEN
+        63 => 1,      // SM_NETWORK
+        67 => 0,      // SM_CLEANBOOT
+        75 => 1,      // SM_MOUSEWHEELPRESENT
+        76 | 77 => 0, // SM_XVIRTUALSCREEN
         78 => m.width as i32,
         79 => m.height as i32,
-        80 => 1,               // SM_CMONITORS
+        80 => 1, // SM_CMONITORS
         _ => {
             s.missing("GetSystemMetrics", format!("index {i}"));
             0
@@ -544,7 +552,15 @@ fn get_class_info_a(s: &mut Session) -> ApiResult {
         return Ok(ApiRet::Ret(0));
     };
     for (i, v) in [
-        c.style, c.wndproc, c.cls_extra, c.wnd_extra, c.hinst, c.icon, c.cursor, c.brush, c.menu,
+        c.style,
+        c.wndproc,
+        c.cls_extra,
+        c.wnd_extra,
+        c.hinst,
+        c.icon,
+        c.cursor,
+        c.brush,
+        c.menu,
     ]
     .iter()
     .enumerate()
@@ -591,7 +607,11 @@ pub enum Act {
     Destroy(u32),
     SetRet(u32),
     /// Finish SetWindowPos: commit the pending rectangle.
-    CommitPos { hwnd: u32, rect: Rect, flags: u32 },
+    CommitPos {
+        hwnd: u32,
+        rect: Rect,
+        flags: u32,
+    },
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -608,10 +628,18 @@ pub enum Step {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum U32Cont {
-    Seq { steps: VecDeque<Step>, ret: u32, last: Option<Check> },
-    Dialog { id: u32 },
+    Seq {
+        steps: VecDeque<Step>,
+        ret: u32,
+        last: Option<Check>,
+    },
+    Dialog {
+        id: u32,
+    },
     RetryGetMessage,
-    MsgWait { n: u32 },
+    MsgWait {
+        n: u32,
+    },
 }
 
 fn send(hwnd: u32, msg: u32, wp: u32, lp: u32) -> Step {
@@ -677,7 +705,11 @@ fn run_act(s: &mut Session, a: Act, steps: &mut VecDeque<Step>, ret: &mut u32) -
             if let Some(w) = s.user.windows.get(&h) {
                 let c = w.client;
                 let p = if w.parent != 0 {
-                    s.user.windows.get(&w.parent).map(|p| (p.client.left, p.client.top)).unwrap_or((0, 0))
+                    s.user
+                        .windows
+                        .get(&w.parent)
+                        .map(|p| (p.client.left, p.client.top))
+                        .unwrap_or((0, 0))
                 } else {
                     (0, 0)
                 };
@@ -894,7 +926,9 @@ fn create_window_ex_a(s: &mut Session) -> ApiResult {
     }
     // Child coordinates are relative to the parent's client area.
     let (ox, oy) = if style & WS_CHILD != 0 {
-        s.window(parent).map(|p| (p.client.left, p.client.top)).unwrap_or((0, 0))
+        s.window(parent)
+            .map(|p| (p.client.left, p.client.top))
+            .unwrap_or((0, 0))
     } else {
         (0, 0)
     };
@@ -928,18 +962,7 @@ fn create_window_ex_a(s: &mut Session) -> ApiResult {
 
     let mut cs = vec![0u8; 48];
     for (i, v) in [
-        param,
-        hinst,
-        menu,
-        parent,
-        h as u32,
-        w as u32,
-        y as u32,
-        x as u32,
-        style,
-        name_p,
-        cls_p,
-        ex,
+        param, hinst, menu, parent, h as u32, w as u32, y as u32, x as u32, style, name_p, cls_p, ex,
     ]
     .iter()
     .enumerate()
@@ -947,7 +970,8 @@ fn create_window_ex_a(s: &mut Session) -> ApiResult {
         cs[i * 4..i * 4 + 4].copy_from_slice(&v.to_le_bytes());
     }
     let mut steps = VecDeque::new();
-    if style & WS_CHILD == 0 && (style & WS_THICKFRAME != 0 || style & WS_CAPTION == WS_CAPTION || style & WS_POPUP == 0)
+    if style & WS_CHILD == 0
+        && (style & WS_THICKFRAME != 0 || style & WS_CAPTION == WS_CAPTION || style & WS_POPUP == 0)
     {
         let mut mmi = vec![0u8; 40];
         let vals: [i32; 10] = [
@@ -1078,7 +1102,13 @@ fn activate_steps(s: &mut Session, new: u32) -> Vec<Step> {
     if new == 0 {
         if s.user.app_active {
             s.user.app_active = false;
-            let tops: Vec<u32> = s.user.windows.values().filter(|w| w.style & WS_CHILD == 0).map(|w| w.hwnd).collect();
+            let tops: Vec<u32> = s
+                .user
+                .windows
+                .values()
+                .filter(|w| w.style & WS_CHILD == 0)
+                .map(|w| w.hwnd)
+                .collect();
             for t in tops {
                 v.push(send(t, WM_ACTIVATEAPP, 0, 0));
             }
@@ -1089,7 +1119,13 @@ fn activate_steps(s: &mut Session, new: u32) -> Vec<Step> {
     if !s.user.app_active {
         s.user.app_active = true;
         let tid = s.tid();
-        let tops: Vec<u32> = s.user.windows.values().filter(|w| w.style & WS_CHILD == 0).map(|w| w.hwnd).collect();
+        let tops: Vec<u32> = s
+            .user
+            .windows
+            .values()
+            .filter(|w| w.style & WS_CHILD == 0)
+            .map(|w| w.hwnd)
+            .collect();
         for t in tops {
             v.push(send(t, WM_ACTIVATEAPP, 1, tid));
         }
@@ -1150,7 +1186,13 @@ fn destroy_steps(s: &mut Session, h: u32) -> Vec<Step> {
         v.extend(activate_steps(s, next));
     }
     v.push(send(h, WM_DESTROY, 0, 0));
-    let children: Vec<u32> = s.user.windows.values().filter(|c| c.parent == h || c.owner == h).map(|c| c.hwnd).collect();
+    let children: Vec<u32> = s
+        .user
+        .windows
+        .values()
+        .filter(|c| c.parent == h || c.owner == h)
+        .map(|c| c.hwnd)
+        .collect();
     for c in children {
         v.push(Step::Act(Act::Destroy(c)));
     }
@@ -1235,15 +1277,21 @@ fn is_window_visible(s: &mut Session) -> ApiResult {
 }
 fn is_iconic(s: &mut Session) -> ApiResult {
     let [h] = s.args::<1>()?;
-    Ok(ApiRet::Ret(s.window(h).map(|w| w.style & WS_MINIMIZE != 0).unwrap_or(false) as u32))
+    Ok(ApiRet::Ret(
+        s.window(h).map(|w| w.style & WS_MINIMIZE != 0).unwrap_or(false) as u32,
+    ))
 }
 fn is_zoomed(s: &mut Session) -> ApiResult {
     let [h] = s.args::<1>()?;
-    Ok(ApiRet::Ret(s.window(h).map(|w| w.style & WS_MAXIMIZE != 0).unwrap_or(false) as u32))
+    Ok(ApiRet::Ret(
+        s.window(h).map(|w| w.style & WS_MAXIMIZE != 0).unwrap_or(false) as u32,
+    ))
 }
 fn is_window_enabled(s: &mut Session) -> ApiResult {
     let [h] = s.args::<1>()?;
-    Ok(ApiRet::Ret(s.window(h).map(|w| w.style & WS_DISABLED == 0).unwrap_or(false) as u32))
+    Ok(ApiRet::Ret(
+        s.window(h).map(|w| w.style & WS_DISABLED == 0).unwrap_or(false) as u32,
+    ))
 }
 fn enable_window(s: &mut Session) -> ApiResult {
     let [h, en] = s.args::<2>()?;
@@ -1373,11 +1421,7 @@ fn set_window_pos_common(s: &mut Session, hwnd: u32, x: i32, y: i32, cx: i32, cy
         lp: LParam::Buf(windowpos(hwnd, &r, flags).to_vec()),
         check: Check::PosChanging(hwnd),
     });
-    steps.push_back(Step::Act(Act::CommitPos {
-        hwnd,
-        rect: r,
-        flags,
-    }));
+    steps.push_back(Step::Act(Act::CommitPos { hwnd, rect: r, flags }));
     if flags & 0x40 != 0 && !w.visible {
         steps.extend(show_steps(s, hwnd, 5)?);
     } else if flags & 0x80 != 0 && w.visible {
@@ -1553,7 +1597,9 @@ fn get_prop_a(s: &mut Session) -> ApiResult {
         StrOrId::Str(x) => x.to_uppercase(),
         StrOrId::Id(a) => format!("#{a}"),
     };
-    Ok(ApiRet::Ret(s.window(h).and_then(|w| w.props.get(&n).copied()).unwrap_or(0)))
+    Ok(ApiRet::Ret(
+        s.window(h).and_then(|w| w.props.get(&n).copied()).unwrap_or(0),
+    ))
 }
 fn remove_prop_a(s: &mut Session) -> ApiResult {
     let [h, name] = s.args::<2>()?;
@@ -1754,7 +1800,9 @@ pub fn def_window_proc(s: &mut Session, hwnd: u32, msg: u32, wp: u32, lp: u32) -
             Ok(ApiRet::Ret(s.write_str_trunc(lp, wp, &t)?))
         }
         WM_GETTEXTLENGTH => Ok(ApiRet::Ret(
-            s.window(hwnd).map(|w| crate::strings::encode_ansi(&w.title).len()).unwrap_or(0) as u32,
+            s.window(hwnd)
+                .map(|w| crate::strings::encode_ansi(&w.title).len())
+                .unwrap_or(0) as u32,
         )),
         0x0011 | 0x0013 => Ok(ApiRet::Ret(1)), // WM_QUERYENDSESSION, WM_QUERYOPEN
         _ => Ok(ApiRet::Ret(0)),
@@ -1778,7 +1826,13 @@ fn call_window_proc_a(s: &mut Session) -> ApiResult {
 fn send_message_a(s: &mut Session) -> ApiResult {
     let [hwnd, msg, wp, lp] = s.args::<4>()?;
     if hwnd == 0xffff {
-        let tops: Vec<u32> = s.user.windows.values().filter(|w| w.style & WS_CHILD == 0).map(|w| w.hwnd).collect();
+        let tops: Vec<u32> = s
+            .user
+            .windows
+            .values()
+            .filter(|w| w.style & WS_CHILD == 0)
+            .map(|w| w.hwnd)
+            .collect();
         let steps: VecDeque<Step> = tops.into_iter().map(|h| send(h, msg, wp, lp)).collect();
         return run_seq(s, steps, 1);
     }
@@ -2184,7 +2238,12 @@ fn invalidate_rect(s: &mut Session) -> ApiResult {
             let full = Rect::new(0, 0, w.client.w(), w.client.h());
             let nr = r.unwrap_or(full);
             w.invalid = Some(match w.invalid {
-                Some(o) => Rect::new(o.left.min(nr.left), o.top.min(nr.top), o.right.max(nr.right), o.bottom.max(nr.bottom)),
+                Some(o) => Rect::new(
+                    o.left.min(nr.left),
+                    o.top.min(nr.top),
+                    o.right.max(nr.right),
+                    o.bottom.max(nr.bottom),
+                ),
                 None => nr,
             });
             w.erase_pending |= erase != 0;
@@ -2240,15 +2299,13 @@ fn begin_paint(s: &mut Session) -> ApiResult {
         if let Some(wm) = s.user.windows.get_mut(&h) {
             wm.erase_pending = false;
         }
-        let steps = VecDeque::from(vec![
-            Step::Send {
-                hwnd: h,
-                msg: WM_ERASEBKGND,
-                wp: hdc,
-                lp: LParam::Val(0),
-                check: Check::None,
-            },
-        ]);
+        let steps = VecDeque::from(vec![Step::Send {
+            hwnd: h,
+            msg: WM_ERASEBKGND,
+            wp: hdc,
+            lp: LParam::Val(0),
+            check: Check::None,
+        }]);
         return run_seq(s, steps, hdc);
     }
     Ok(ApiRet::Ret(hdc))
@@ -2329,8 +2386,13 @@ fn map_virtual_key_a(s: &mut Session) -> ApiResult {
     let [code, ty] = s.args::<2>()?;
     let r = match ty {
         0 => input::vk_to_scan(code as u8) as u32,
-        1 | 3 => (0..=255u8).find(|&v| input::vk_to_scan(v) as u32 == code && v != 0x10 && v != 0x11 && v != 0x12).map(|v| v as u32).unwrap_or(0),
-        2 => input::vk_to_char(code as u8, false, false).map(|c| c.to_ascii_uppercase() as u32).unwrap_or(0),
+        1 | 3 => (0..=255u8)
+            .find(|&v| input::vk_to_scan(v) as u32 == code && v != 0x10 && v != 0x11 && v != 0x12)
+            .map(|v| v as u32)
+            .unwrap_or(0),
+        2 => input::vk_to_char(code as u8, false, false)
+            .map(|c| c.to_ascii_uppercase() as u32)
+            .unwrap_or(0),
         _ => 0,
     };
     Ok(ApiRet::Ret(r))
@@ -2566,7 +2628,12 @@ fn union_rect(s: &mut Session) -> ApiResult {
     } else if rb.is_empty() {
         ra
     } else {
-        Rect::new(ra.left.min(rb.left), ra.top.min(rb.top), ra.right.max(rb.right), ra.bottom.max(rb.bottom))
+        Rect::new(
+            ra.left.min(rb.left),
+            ra.top.min(rb.top),
+            ra.right.max(rb.right),
+            ra.bottom.max(rb.bottom),
+        )
     };
     s.write_rect(d, &r)?;
     Ok(ApiRet::Ret(!r.is_empty() as u32))
@@ -2604,7 +2671,11 @@ fn adjust_window_rect(s: &mut Session) -> ApiResult {
 }
 
 /// wsprintfA / wvsprintfA formatting (subset of printf used by Windows' implementation).
-pub fn format_wsprintf(s: &Session, fmt: &[u8], mut next: impl FnMut() -> Result<u32, ApiError>) -> Result<Vec<u8>, ApiError> {
+pub fn format_wsprintf(
+    s: &Session,
+    fmt: &[u8],
+    mut next: impl FnMut() -> Result<u32, ApiError>,
+) -> Result<Vec<u8>, ApiError> {
     let mut out = Vec::new();
     let mut i = 0;
     while i < fmt.len() {
@@ -2679,7 +2750,11 @@ pub fn format_wsprintf(s: &Session, fmt: &[u8], mut next: impl FnMut() -> Result
             b'c' => vec![next()? as u8],
             b's' => {
                 let p = next()?;
-                let mut b = if p == 0 { b"(null)".to_vec() } else { s.mem.read_cstr(p, 0x100000)? };
+                let mut b = if p == 0 {
+                    b"(null)".to_vec()
+                } else {
+                    s.mem.read_cstr(p, 0x100000)?
+                };
                 if let Some(pr) = prec {
                     b.truncate(pr);
                 }
@@ -2887,14 +2962,21 @@ fn system_parameters_info_a(s: &mut Session) -> ApiResult {
 
 pub fn has_input(s: &Session, tid: u32, _mask: u32) -> bool {
     let Some(q) = s.user.queues.get(&tid) else {
-        return s.user.windows.values().any(|w| w.tid == tid && w.visible && w.invalid.is_some());
+        return s
+            .user
+            .windows
+            .values()
+            .any(|w| w.tid == tid && w.visible && w.invalid.is_some());
     };
     if !q.posted.is_empty() || !q.input.is_empty() || q.quit.is_some() {
         return true;
     }
     let now = s.clock.now_ns();
     s.user.timers.iter().any(|t| t.tid == tid && t.due <= now)
-        || s.user.windows.values().any(|w| w.tid == tid && w.visible && w.invalid.is_some())
+        || s.user
+            .windows
+            .values()
+            .any(|w| w.tid == tid && w.visible && w.invalid.is_some())
 }
 
 pub fn next_event(s: &Session) -> Option<u64> {

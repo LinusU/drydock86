@@ -144,8 +144,7 @@ fn time_set_event(s: &mut Session) -> ApiResult {
     });
     if flags & 0x30 == 0 && s.winmm.timer_thread.is_none() {
         let start = s.thunks.find("DRYDOCK.DLL", "MmTimerThread").unwrap();
-        let tid = crate::loader::create_thread(s, start, 0, 0x10000, false, true)
-            .map_err(ApiError::Fatal)?;
+        let tid = crate::loader::create_thread(s, start, 0, 0x10000, false, true).map_err(ApiError::Fatal)?;
         s.sched.threads.get_mut(&tid).unwrap().priority = 15; // THREAD_PRIORITY_TIME_CRITICAL
         s.winmm.timer_thread = Some(tid);
     }
@@ -258,7 +257,15 @@ fn joy_get_pos_ex(s: &mut Session) -> ApiResult {
         return Ok(ApiRet::Ret(JOYERR_UNPLUGGED));
     }
     let a = s.user.input.joy_axes;
-    let vals = [a[0] as u32, a[1] as u32, a[2] as u32, a[3] as u32, 32768, 32768, s.user.input.joy_buttons];
+    let vals = [
+        a[0] as u32,
+        a[1] as u32,
+        a[2] as u32,
+        a[3] as u32,
+        32768,
+        32768,
+        s.user.input.joy_buttons,
+    ];
     for (i, v) in vals.iter().enumerate() {
         s.mem.write_u32(p + 8 + 4 * i as u32, *v)?;
     }
@@ -360,8 +367,16 @@ fn mci_open(s: &mut Session, flags: u32, parms: u32) -> Result<u32, ApiError> {
     } else {
         String::new()
     };
-    let element = if flags & 0x200 != 0 && el_p != 0 { s.read_str(el_p)? } else { String::new() };
-    let alias = if flags & 0x400 != 0 && al_p != 0 { s.read_str(al_p)? } else { String::new() };
+    let element = if flags & 0x200 != 0 && el_p != 0 {
+        s.read_str(el_p)?
+    } else {
+        String::new()
+    };
+    let alias = if flags & 0x400 != 0 && al_p != 0 {
+        s.read_str(al_p)?
+    } else {
+        String::new()
+    };
     match kind.as_str() {
         "cdaudio" => {
             let has_cd = s.vfs.drives.values().any(|d| d.kind == crate::vfs::DriveKind::CdRom);

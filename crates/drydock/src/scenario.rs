@@ -42,7 +42,9 @@ pub struct Scenario {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(untagged)]
 pub enum Step {
-    Run { run: f64 },
+    Run {
+        run: f64,
+    },
     Key {
         key: String,
         #[serde(default)]
@@ -50,29 +52,55 @@ pub enum Step {
         #[serde(default)]
         hold: Option<f64>,
     },
-    KeyDown { key_down: String },
-    KeyUp { key_up: String },
-    Type { r#type: String },
+    KeyDown {
+        key_down: String,
+    },
+    KeyUp {
+        key_up: String,
+    },
+    Type {
+        r#type: String,
+    },
     Click {
         click: [i32; 2],
         #[serde(default)]
         button: Option<String>,
     },
-    MouseMove { mouse_move: [i32; 2] },
-    MouseRel { mouse_rel: [i32; 2] },
-    Screenshot { screenshot: String },
+    MouseMove {
+        mouse_move: [i32; 2],
+    },
+    MouseRel {
+        mouse_rel: [i32; 2],
+    },
+    Screenshot {
+        screenshot: String,
+    },
     WaitFor {
         wait_for: Cond,
         #[serde(default = "default_timeout")]
         timeout: f64,
     },
-    Assert { assert: Cond },
-    AnswerDialog { answer_dialog: u32 },
-    ReleaseAll { release_all: bool },
-    Savepoint { savepoint: String },
-    Save { save: String },
-    Restore { restore: String },
-    Note { note: String },
+    Assert {
+        assert: Cond,
+    },
+    AnswerDialog {
+        answer_dialog: u32,
+    },
+    ReleaseAll {
+        release_all: bool,
+    },
+    Savepoint {
+        savepoint: String,
+    },
+    Save {
+        save: String,
+    },
+    Restore {
+        restore: String,
+    },
+    Note {
+        note: String,
+    },
 }
 
 fn default_timeout() -> f64 {
@@ -96,7 +124,11 @@ impl Cond {
     pub fn check(&self, d: &Driver) -> bool {
         let s = &d.s;
         if let Some(t) = &self.window_title
-            && !s.user.windows.values().any(|w| w.visible && w.title.contains(t.as_str()))
+            && !s
+                .user
+                .windows
+                .values()
+                .any(|w| w.visible && w.title.contains(t.as_str()))
         {
             return false;
         }
@@ -181,7 +213,13 @@ pub enum StepOutcome {
 }
 
 /// Execute one step. Observations it produces are appended to `log`.
-pub fn step(d: &mut Driver, ctx: &mut Ctx, step: &Step, artifacts: &Path, log: &mut Vec<serde_json::Value>) -> Result<StepOutcome> {
+pub fn step(
+    d: &mut Driver,
+    ctx: &mut Ctx,
+    step: &Step,
+    artifacts: &Path,
+    log: &mut Vec<serde_json::Value>,
+) -> Result<StepOutcome> {
     let stop = match step {
         Step::Run { run } => advance(d, secs(*run)),
         Step::Key { key, mods, hold } => {
@@ -241,19 +279,37 @@ pub fn step(d: &mut Driver, ctx: &mut Ctx, step: &Step, artifacts: &Path, log: &
             };
             let now = d.s.clock.now_ns();
             let inp = &mut d.s.user.input;
-            inp.schedule(now, InputEvent::MouseMove { x: click[0], y: click[1] });
+            inp.schedule(
+                now,
+                InputEvent::MouseMove {
+                    x: click[0],
+                    y: click[1],
+                },
+            );
             inp.schedule(now + 10_000_000, InputEvent::MouseButton { button: b, down: true });
             inp.schedule(now + 70_000_000, InputEvent::MouseButton { button: b, down: false });
             advance(d, 120_000_000)
         }
         Step::MouseMove { mouse_move } => {
             let now = d.s.clock.now_ns();
-            d.s.user.input.schedule(now, InputEvent::MouseMove { x: mouse_move[0], y: mouse_move[1] });
+            d.s.user.input.schedule(
+                now,
+                InputEvent::MouseMove {
+                    x: mouse_move[0],
+                    y: mouse_move[1],
+                },
+            );
             advance(d, 10_000_000)
         }
         Step::MouseRel { mouse_rel } => {
             let now = d.s.clock.now_ns();
-            d.s.user.input.schedule(now, InputEvent::MouseRel { dx: mouse_rel[0], dy: mouse_rel[1] });
+            d.s.user.input.schedule(
+                now,
+                InputEvent::MouseRel {
+                    dx: mouse_rel[0],
+                    dy: mouse_rel[1],
+                },
+            );
             advance(d, 10_000_000)
         }
         Step::Screenshot { screenshot } => {
@@ -343,14 +399,26 @@ pub fn run(d: &mut Driver, sc: &Scenario, artifacts: &Path) -> Result<Outcome> {
             StepOutcome::Continue => {}
             StepOutcome::Failed(reason) => {
                 log.push(serde_json::json!({ "failed": i, "reason": reason }));
-                return Ok(Outcome { ok: false, log, stop: None });
+                return Ok(Outcome {
+                    ok: false,
+                    log,
+                    stop: None,
+                });
             }
             StepOutcome::Stopped(stop) => {
                 let ok = matches!(stop, RunStop::Exited { .. }) && i + 1 == sc.steps.len();
                 log.push(serde_json::json!({ "stopped": stop, "at_step": i }));
-                return Ok(Outcome { ok, log, stop: Some(stop) });
+                return Ok(Outcome {
+                    ok,
+                    log,
+                    stop: Some(stop),
+                });
             }
         }
     }
-    Ok(Outcome { ok: true, log, stop: None })
+    Ok(Outcome {
+        ok: true,
+        log,
+        stop: None,
+    })
 }

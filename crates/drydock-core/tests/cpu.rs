@@ -1,6 +1,6 @@
+use drydock_core::Reg;
 use drydock_core::cpu::{Cpu, FaultKind, GDT_BASE, Regs, Stop};
 use drydock_core::mem::*;
-use drydock_core::Reg;
 use iced_x86::code_asm::*;
 
 const CODE: u32 = 0x40_1000;
@@ -20,10 +20,26 @@ fn asm(f: impl FnOnce(&mut CodeAssembler)) -> Vec<u8> {
 
 fn machine(code: &[u8]) -> M {
     let mut mem = AddressSpace::new();
-    mem.alloc(Some(0x40_0000), 0x10000, RegionKind::Image, PAGE_EXECUTE_READWRITE, "code").unwrap();
-    mem.alloc(Some(STACK - 0x10000), 0x10000, RegionKind::Private, PAGE_READWRITE, "stack").unwrap();
-    mem.alloc(Some(TEB), 0x1000, RegionKind::System, PAGE_READWRITE, "teb").unwrap();
-    mem.alloc(Some(GDT_BASE), 0x1000, RegionKind::System, PAGE_READWRITE, "gdt").unwrap();
+    mem.alloc(
+        Some(0x40_0000),
+        0x10000,
+        RegionKind::Image,
+        PAGE_EXECUTE_READWRITE,
+        "code",
+    )
+    .unwrap();
+    mem.alloc(
+        Some(STACK - 0x10000),
+        0x10000,
+        RegionKind::Private,
+        PAGE_READWRITE,
+        "stack",
+    )
+    .unwrap();
+    mem.alloc(Some(TEB), 0x1000, RegionKind::System, PAGE_READWRITE, "teb")
+        .unwrap();
+    mem.alloc(Some(GDT_BASE), 0x1000, RegionKind::System, PAGE_READWRITE, "gdt")
+        .unwrap();
     mem.write_u32(TEB + 0x18, TEB).unwrap();
     mem.write_force(CODE, code).unwrap();
     let mut cpu = Cpu::new().unwrap();
@@ -49,7 +65,12 @@ fn api_trap_reports_next_eip() {
     });
     let mut m = machine(&code);
     let s = m.run();
-    assert_eq!(s, Stop::ApiTrap { eip: CODE + code.len() as u32 - 1 });
+    assert_eq!(
+        s,
+        Stop::ApiTrap {
+            eip: CODE + code.len() as u32 - 1
+        }
+    );
     assert_eq!(m.cpu.reg(Reg::EAX), 8);
 }
 
@@ -236,7 +257,6 @@ fn guest_self_modifying_code_executes_new_bytes() {
     assert!(matches!(m.run(), Stop::ApiTrap { .. }));
     assert_eq!(m.cpu.reg(Reg::EAX), 7);
 }
-
 
 #[test]
 fn stack_is_32_bit_after_segment_loads() {

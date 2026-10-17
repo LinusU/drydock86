@@ -35,9 +35,22 @@ pub const CONTEXT_FULL_FLAGS: u32 = 0x1003f;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum SehCont {
-    Dispatch { rec: u32, ctx: u32, frame: u32 },
-    TopFilter { rec: u32, ctx: u32 },
-    Unwind { target: u32, rec: u32, ctx: u32, frame: u32, retval: u32 },
+    Dispatch {
+        rec: u32,
+        ctx: u32,
+        frame: u32,
+    },
+    TopFilter {
+        rec: u32,
+        ctx: u32,
+    },
+    Unwind {
+        target: u32,
+        rec: u32,
+        ctx: u32,
+        frame: u32,
+        retval: u32,
+    },
     /// kernel32!UnhandledExceptionFilter forwarded to the top-level filter.
     UefForward,
 }
@@ -131,12 +144,8 @@ fn fault_code(f: &Fault) -> (u32, Vec<u32>, u32) {
     // (code, parameters, exception address)
     match &f.kind {
         FaultKind::ReadUnmapped | FaultKind::ReadProt => (STATUS_ACCESS_VIOLATION, vec![0, f.addr], f.eip),
-        FaultKind::WriteUnmapped | FaultKind::WriteProt => {
-            (STATUS_ACCESS_VIOLATION, vec![1, f.addr], f.eip)
-        }
-        FaultKind::FetchUnmapped | FaultKind::FetchProt => {
-            (STATUS_ACCESS_VIOLATION, vec![0, f.addr], f.addr)
-        }
+        FaultKind::WriteUnmapped | FaultKind::WriteProt => (STATUS_ACCESS_VIOLATION, vec![1, f.addr], f.eip),
+        FaultKind::FetchUnmapped | FaultKind::FetchProt => (STATUS_ACCESS_VIOLATION, vec![0, f.addr], f.addr),
         FaultKind::InvalidInsn => (STATUS_ILLEGAL_INSTRUCTION, vec![], f.eip),
         FaultKind::Exception(0) => (STATUS_INTEGER_DIVIDE_BY_ZERO, vec![], f.eip),
         FaultKind::Exception(1) => (STATUS_SINGLE_STEP, vec![], f.eip),
@@ -262,9 +271,7 @@ fn crash(s: &mut Session, rec: u32) -> ApiResult {
 fn continue_with_context(s: &mut Session, ctx: u32) -> ApiResult {
     let base = s.cpu.read_regs();
     let r = read_context(s, ctx, &base)?;
-    s.cpu
-        .write_regs(&mut s.mem, &r)
-        .map_err(ApiError::Fatal)?;
+    s.cpu.write_regs(&mut s.mem, &r).map_err(ApiError::Fatal)?;
     Ok(ApiRet::Raw)
 }
 

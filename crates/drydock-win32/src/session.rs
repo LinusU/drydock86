@@ -112,12 +112,29 @@ pub enum RunStop {
     TimeReached,
     InsnLimit,
     /// Every thread is blocked; `next_event` is the earliest scheduled wake-up.
-    Idle { next_event: Option<u64> },
-    Breakpoint { tid: u32, addr: u32 },
-    Watchpoint { tid: u32, addr: u32, write: bool, eip: u32 },
-    ApiBreak { tid: u32, api: String },
-    Presented { frame: u64 },
-    Exited { code: u32 },
+    Idle {
+        next_event: Option<u64>,
+    },
+    Breakpoint {
+        tid: u32,
+        addr: u32,
+    },
+    Watchpoint {
+        tid: u32,
+        addr: u32,
+        write: bool,
+        eip: u32,
+    },
+    ApiBreak {
+        tid: u32,
+        api: String,
+    },
+    Presented {
+        frame: u64,
+    },
+    Exited {
+        code: u32,
+    },
     Halted,
     Cancelled,
 }
@@ -414,10 +431,7 @@ impl Session {
                 continue;
             }
             // Pending API continuation?
-            let state = std::mem::replace(
-                &mut self.sched.cur_mut().state,
-                ThreadState::Ready,
-            );
+            let state = std::mem::replace(&mut self.sched.cur_mut().state, ThreadState::Ready);
             if let ThreadState::Resume { api, cont, val } = state {
                 let r = self.resume_api(api, cont, val);
                 self.finish_api(api, r);
@@ -428,10 +442,7 @@ impl Session {
             let p = &self.config.cpu;
             let ns_to_insns = |ns: u64| ns.saturating_mul(p.ns_per_insn_den) / p.ns_per_insn_num.max(1);
             let mut budget = self.sched.cur().quantum_end.saturating_sub(insns).max(1);
-            let horizon = self
-                .next_event_time()
-                .unwrap_or(u64::MAX)
-                .min(limit.until_ns);
+            let horizon = self.next_event_time().unwrap_or(u64::MAX).min(limit.until_ns);
             let hb = ns_to_insns(horizon.saturating_sub(now)).max(1);
             if hb < budget {
                 self.stats.budget_by_horizon += 1;
@@ -463,15 +474,8 @@ impl Session {
                 Ok(Stop::Breakpoint { addr }) => {
                     return RunStop::Breakpoint { tid, addr };
                 }
-                Ok(Stop::Watchpoint {
-                    addr, write, eip, ..
-                }) => {
-                    return RunStop::Watchpoint {
-                        tid,
-                        addr,
-                        write,
-                        eip,
-                    };
+                Ok(Stop::Watchpoint { addr, write, eip, .. }) => {
+                    return RunStop::Watchpoint { tid, addr, write, eip };
                 }
                 Ok(Stop::Fault(f)) => {
                     // First execution from a readable data page: allowed without DEP.
@@ -513,9 +517,9 @@ impl Session {
         {
             // Rewind so that resuming re-dispatches the call.
             self.cpu.set_reg(Reg::EIP, thunk);
-            self.host.api_breaks.retain(|b| {
-                !(name.eq_ignore_ascii_case(b) || info.name.eq_ignore_ascii_case(b))
-            });
+            self.host
+                .api_breaks
+                .retain(|b| !(name.eq_ignore_ascii_case(b) || info.name.eq_ignore_ascii_case(b)));
             return Some(RunStop::ApiBreak {
                 tid: self.tid(),
                 api: name,
@@ -571,11 +575,7 @@ impl Session {
             Ok(ApiRet::Raw) => {}
             Err(ApiError::Mem(e)) => {
                 let name = self.thunks.name_of(api);
-                self.event(
-                    Severity::Warning,
-                    "api-access-violation",
-                    format!("{name}: {e}"),
-                );
+                self.event(Severity::Warning, "api-access-violation", format!("{name}: {e}"));
                 crate::seh::raise_access_violation_in_api(self, api, &e);
             }
             Err(ApiError::Unimplemented(what)) => {
@@ -671,11 +671,7 @@ impl Session {
 
     fn callback_returned(&mut self) {
         let Some(f) = self.sched.cur_mut().frames.pop() else {
-            self.halt(
-                "callback",
-                "callback return with no pending frame".into(),
-                None,
-            );
+            self.halt("callback", "callback return with no pending frame".into(), None);
             return;
         };
         let eax = self.cpu.reg(Reg::EAX);
@@ -935,7 +931,12 @@ mod exec_tests {
                 a.int3()
             });
         let mut s = crate::testutil::session_with(&pe);
-        let stop = s.run(RunLimit { until_ns: 1_000_000_000, max_insns: None, stop_on_present: false, jump_idle: true });
+        let stop = s.run(RunLimit {
+            until_ns: 1_000_000_000,
+            max_insns: None,
+            stop_on_present: false,
+            jump_idle: true,
+        });
         assert_eq!(stop, RunStop::Exited { code: 49 }, "halt: {:?}", s.diag.halt);
     }
 }

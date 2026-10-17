@@ -7,7 +7,10 @@ use crate::vfs::{self, Disposition, GuestPath, Vfs};
 /// A session whose executable `C:\TEST\T.EXE` is `pe`, stored in the in-memory overlay.
 pub fn session_with(pe: &[u8]) -> Session {
     let mut v = Vfs::new();
-    let root = GuestPath { drive: 'C', comps: vec![] };
+    let root = GuestPath {
+        drive: 'C',
+        comps: vec![],
+    };
     let dir = vfs::normalize("C:\\TEST", &root).unwrap();
     v.mkdir(&dir, 0).unwrap();
     let exe = dir.join("T.EXE");

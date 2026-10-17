@@ -364,14 +364,38 @@ fn blend_factor(f: u32, alpha: bool) -> wgpu::BlendFactor {
     match f {
         1 => B::Zero,
         2 => B::One,
-        3 => if alpha { B::SrcAlpha } else { B::Src },
-        4 => if alpha { B::OneMinusSrcAlpha } else { B::OneMinusSrc },
+        3 => {
+            if alpha {
+                B::SrcAlpha
+            } else {
+                B::Src
+            }
+        }
+        4 => {
+            if alpha {
+                B::OneMinusSrcAlpha
+            } else {
+                B::OneMinusSrc
+            }
+        }
         5 => B::SrcAlpha,
         6 => B::OneMinusSrcAlpha,
         7 => B::DstAlpha,
         8 => B::OneMinusDstAlpha,
-        9 => if alpha { B::DstAlpha } else { B::Dst },
-        10 => if alpha { B::OneMinusDstAlpha } else { B::OneMinusDst },
+        9 => {
+            if alpha {
+                B::DstAlpha
+            } else {
+                B::Dst
+            }
+        }
+        10 => {
+            if alpha {
+                B::OneMinusDstAlpha
+            } else {
+                B::OneMinusDst
+            }
+        }
         11 => B::SrcAlphaSaturated,
         _ => B::One,
     }
@@ -566,7 +590,11 @@ impl Renderer {
     }
 
     fn flush_if_referenced(&mut self, key: u32) {
-        if self.pending.as_ref().is_some_and(|p| p.referenced.contains(&key) || p.target == key || p.depth == Some(key)) {
+        if self
+            .pending
+            .as_ref()
+            .is_some_and(|p| p.referenced.contains(&key) || p.target == key || p.depth == Some(key))
+        {
             self.flush();
         }
     }
@@ -623,12 +651,34 @@ impl Renderer {
         let key = PipeKey {
             topology: Topology::Triangles,
             blend: None,
-            depth: z.map(|_| DepthState { func: 8, write: true, bias: 0 }),
+            depth: z.map(|_| DepthState {
+                func: 8,
+                write: true,
+                bias: 0,
+            }),
             cull: 1,
             color_write: color.is_some(),
         };
-        let vp = Viewport { x: 0.0, y: 0.0, w: tw, h: th, min_z: 0.0, max_z: 1.0 };
-        self.draw(target, depth, key, &u, &verts, &[0, 1, 2, 2, 1, 3], [None, None], [SamplerKey::default(); 2], vp, [x, y, w, h]);
+        let vp = Viewport {
+            x: 0.0,
+            y: 0.0,
+            w: tw,
+            h: th,
+            min_z: 0.0,
+            max_z: 1.0,
+        };
+        self.draw(
+            target,
+            depth,
+            key,
+            &u,
+            &verts,
+            &[0, 1, 2, 2, 1, 3],
+            [None, None],
+            [SamplerKey::default(); 2],
+            vp,
+            [x, y, w, h],
+        );
     }
 
     /// Read back a color target (RGBA8) or depth target (f32 as bytes).
@@ -752,7 +802,11 @@ impl Renderer {
         let (pipe, bgl) = self.depth_upload.as_ref().unwrap();
         let src = d.create_texture(&wgpu::TextureDescriptor {
             label: Some("depth-src"),
-            size: wgpu::Extent3d { width: w, height: h, depth_or_array_layers: 1 },
+            size: wgpu::Extent3d {
+                width: w,
+                height: h,
+                depth_or_array_layers: 1,
+            },
             mip_level_count: 1,
             sample_count: 1,
             dimension: wgpu::TextureDimension::D2,
@@ -767,14 +821,25 @@ impl Renderer {
         self.gpu.queue.write_texture(
             src.as_image_copy(),
             &bytes,
-            wgpu::TexelCopyBufferLayout { offset: 0, bytes_per_row: Some(w * 4), rows_per_image: None },
-            wgpu::Extent3d { width: w, height: h, depth_or_array_layers: 1 },
+            wgpu::TexelCopyBufferLayout {
+                offset: 0,
+                bytes_per_row: Some(w * 4),
+                rows_per_image: None,
+            },
+            wgpu::Extent3d {
+                width: w,
+                height: h,
+                depth_or_array_layers: 1,
+            },
         );
         let view = src.create_view(&Default::default());
         let bg = d.create_bind_group(&wgpu::BindGroupDescriptor {
             label: Some("depth-upload"),
             layout: bgl,
-            entries: &[wgpu::BindGroupEntry { binding: 0, resource: wgpu::BindingResource::TextureView(&view) }],
+            entries: &[wgpu::BindGroupEntry {
+                binding: 0,
+                resource: wgpu::BindingResource::TextureView(&view),
+            }],
         });
         let mut enc = d.create_command_encoder(&Default::default());
         {
@@ -783,7 +848,10 @@ impl Renderer {
                 color_attachments: &[],
                 depth_stencil_attachment: Some(wgpu::RenderPassDepthStencilAttachment {
                     view: &t.view,
-                    depth_ops: Some(wgpu::Operations { load: wgpu::LoadOp::Load, store: wgpu::StoreOp::Store }),
+                    depth_ops: Some(wgpu::Operations {
+                        load: wgpu::LoadOp::Load,
+                        store: wgpu::StoreOp::Store,
+                    }),
                     stencil_ops: None,
                 }),
                 timestamp_writes: None,
@@ -821,9 +889,17 @@ impl Renderer {
             t.tex.as_image_copy(),
             wgpu::TexelCopyBufferInfo {
                 buffer: &buf,
-                layout: wgpu::TexelCopyBufferLayout { offset: 0, bytes_per_row: Some(bpr), rows_per_image: Some(h) },
+                layout: wgpu::TexelCopyBufferLayout {
+                    offset: 0,
+                    bytes_per_row: Some(bpr),
+                    rows_per_image: Some(h),
+                },
             },
-            wgpu::Extent3d { width: w, height: h, depth_or_array_layers: 1 },
+            wgpu::Extent3d {
+                width: w,
+                height: h,
+                depth_or_array_layers: 1,
+            },
         );
         self.gpu.queue.submit([enc.finish()]);
         let ready = Arc::new(std::sync::atomic::AtomicBool::new(false));
@@ -877,13 +953,37 @@ impl Renderer {
         }
         let blend = kk.blend.map(|b| wgpu::BlendState {
             color: wgpu::BlendComponent {
-                src_factor: if b.src == 12 { wgpu::BlendFactor::SrcAlpha } else if b.src == 13 { wgpu::BlendFactor::OneMinusSrcAlpha } else { blend_factor(b.src, false) },
-                dst_factor: if b.src == 12 { wgpu::BlendFactor::OneMinusSrcAlpha } else if b.src == 13 { wgpu::BlendFactor::SrcAlpha } else { blend_factor(b.dst, false) },
+                src_factor: if b.src == 12 {
+                    wgpu::BlendFactor::SrcAlpha
+                } else if b.src == 13 {
+                    wgpu::BlendFactor::OneMinusSrcAlpha
+                } else {
+                    blend_factor(b.src, false)
+                },
+                dst_factor: if b.src == 12 {
+                    wgpu::BlendFactor::OneMinusSrcAlpha
+                } else if b.src == 13 {
+                    wgpu::BlendFactor::SrcAlpha
+                } else {
+                    blend_factor(b.dst, false)
+                },
                 operation: wgpu::BlendOperation::Add,
             },
             alpha: wgpu::BlendComponent {
-                src_factor: if b.src == 12 { wgpu::BlendFactor::SrcAlpha } else if b.src == 13 { wgpu::BlendFactor::OneMinusSrcAlpha } else { blend_factor(b.src, true) },
-                dst_factor: if b.src == 12 { wgpu::BlendFactor::OneMinusSrcAlpha } else if b.src == 13 { wgpu::BlendFactor::SrcAlpha } else { blend_factor(b.dst, true) },
+                src_factor: if b.src == 12 {
+                    wgpu::BlendFactor::SrcAlpha
+                } else if b.src == 13 {
+                    wgpu::BlendFactor::OneMinusSrcAlpha
+                } else {
+                    blend_factor(b.src, true)
+                },
+                dst_factor: if b.src == 12 {
+                    wgpu::BlendFactor::OneMinusSrcAlpha
+                } else if b.src == 13 {
+                    wgpu::BlendFactor::SrcAlpha
+                } else {
+                    blend_factor(b.dst, true)
+                },
                 operation: wgpu::BlendOperation::Add,
             },
         });
@@ -972,7 +1072,13 @@ impl Renderer {
         if let Some(s) = self.samplers.get(&k) {
             return s.clone();
         }
-        let f = |v: u32| if v >= 2 { wgpu::FilterMode::Linear } else { wgpu::FilterMode::Nearest };
+        let f = |v: u32| {
+            if v >= 2 {
+                wgpu::FilterMode::Linear
+            } else {
+                wgpu::FilterMode::Nearest
+            }
+        };
         let s = self.gpu.device.create_sampler(&wgpu::SamplerDescriptor {
             label: Some("ff"),
             address_mode_u: address(k.addr_u),
@@ -1013,7 +1119,11 @@ impl Renderer {
         }
         // A draw whose depth target is missing renders without depth.
         let depth = depth.filter(|d| self.textures.contains_key(d));
-        if self.pending.as_ref().is_some_and(|p| p.target != target || p.depth != depth) {
+        if self
+            .pending
+            .as_ref()
+            .is_some_and(|p| p.target != target || p.depth != depth)
+        {
             self.flush();
         }
         let p = self.pending.get_or_insert_with(|| PendingPass {
@@ -1079,7 +1189,9 @@ impl Renderer {
         .into_iter()
         .enumerate()
         {
-            let need = (bytes.len() as u64).max(256).next_multiple_of(wgpu::COPY_BUFFER_ALIGNMENT);
+            let need = (bytes.len() as u64)
+                .max(256)
+                .next_multiple_of(wgpu::COPY_BUFFER_ALIGNMENT);
             if self.stream[slot].as_ref().is_none_or(|b| b.size() < need) {
                 self.stream[slot] = Some(d.create_buffer(&wgpu::BufferDescriptor {
                     label: Some(label),
@@ -1123,8 +1235,14 @@ impl Renderer {
             if !groups.contains_key(&key) {
                 let s0 = self.sampler(op.samplers[0]);
                 let s1 = self.sampler(op.samplers[1]);
-                let v0 = op.textures[0].and_then(|t| self.textures.get(&t)).map(|t| &t.view).unwrap_or(&self.white);
-                let v1 = op.textures[1].and_then(|t| self.textures.get(&t)).map(|t| &t.view).unwrap_or(&self.white);
+                let v0 = op.textures[0]
+                    .and_then(|t| self.textures.get(&t))
+                    .map(|t| &t.view)
+                    .unwrap_or(&self.white);
+                let v1 = op.textures[1]
+                    .and_then(|t| self.textures.get(&t))
+                    .map(|t| &t.view)
+                    .unwrap_or(&self.white);
                 let bg = d.create_bind_group(&wgpu::BindGroupDescriptor {
                     label: Some("tex"),
                     layout: &self.tex_layout,
@@ -1192,7 +1310,14 @@ impl Renderer {
                 let vy = vp.y.clamp(0.0, th as f32);
                 let vw = vp.w.min(tw as f32 - vx).max(1.0);
                 let vh = vp.h.min(th as f32 - vy).max(1.0);
-                rp.set_viewport(vx, vy, vw, vh, vp.min_z.clamp(0.0, 1.0), vp.max_z.clamp(0.0, 1.0).max(vp.min_z.clamp(0.0, 1.0)));
+                rp.set_viewport(
+                    vx,
+                    vy,
+                    vw,
+                    vh,
+                    vp.min_z.clamp(0.0, 1.0),
+                    vp.max_z.clamp(0.0, 1.0).max(vp.min_z.clamp(0.0, 1.0)),
+                );
                 let [sx, sy, sw, sh] = op.scissor;
                 let sx = sx.min(tw);
                 let sy = sy.min(th);
@@ -1206,7 +1331,11 @@ impl Renderer {
                 rp.set_bind_group(0, &ubg, &[op.uniform_offset]);
                 rp.set_bind_group(1, &groups[&(op.textures, op.samplers)], &[]);
                 let _ = op.vertex_count;
-                rp.draw_indexed(op.first_index..op.first_index + op.index_count, op.first_vertex as i32, 0..1);
+                rp.draw_indexed(
+                    op.first_index..op.first_index + op.index_count,
+                    op.first_vertex as i32,
+                    0..1,
+                );
             }
         }
         self.gpu.queue.submit([enc.finish()]);

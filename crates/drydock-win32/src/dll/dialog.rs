@@ -7,9 +7,9 @@
 
 use super::user32::*;
 use crate::api::*;
+use crate::export;
 use crate::session::Session;
 use crate::strings::StrOrId;
-use crate::export;
 use serde::{Deserialize, Serialize};
 use std::collections::VecDeque;
 
@@ -70,7 +70,13 @@ pub enum DlgCont {
     /// Creation: finish after WM_INITDIALOG.
     Created { hdlg: u32, modal: bool, owner: u32 },
     /// EM_STREAMIN callback loop.
-    Stream { hwnd: u32, es: u32, buf: u32, data: Vec<u8>, rtf: bool },
+    Stream {
+        hwnd: u32,
+        es: u32,
+        buf: u32,
+        data: Vec<u8>,
+        rtf: bool,
+    },
 }
 
 impl Session {
@@ -330,7 +336,16 @@ fn class_for_item(c: &StrOrId) -> String {
 
 /// Create a window record directly (used for dialogs and their controls, whose
 /// creation messages are then delivered through a message sequence).
-fn new_window(s: &mut Session, class: &str, title: &str, style: u32, ex: u32, rect: Rect, parent: u32, id: u32) -> Option<u32> {
+fn new_window(
+    s: &mut Session,
+    class: &str,
+    title: &str,
+    style: u32,
+    ex: u32,
+    rect: Rect,
+    parent: u32,
+    id: u32,
+) -> Option<u32> {
     let cls = s.user.classes.get(class).cloned()?;
     let hwnd = s.user.next_hwnd;
     s.user.next_hwnd += 0x10;
@@ -358,30 +373,43 @@ fn new_window(s: &mut Session, class: &str, title: &str, style: u32, ex: u32, re
     };
     let menu = false;
     let i = nc_insets(w.style, w.exstyle, menu);
-    w.client = Rect::new(rect.left + i.left, rect.top + i.top, rect.right - i.right, rect.bottom - i.bottom);
+    w.client = Rect::new(
+        rect.left + i.left,
+        rect.top + i.top,
+        rect.right - i.right,
+        rect.bottom - i.bottom,
+    );
     s.user.windows.insert(hwnd, w);
     Some(hwnd)
 }
 
-fn create_dialog_common(s: &mut Session, hinst: u32, tmpl_p: u32, owner: u32, dlgproc: u32, param: u32, modal: bool, from_resource: bool) -> ApiResult {
+fn create_dialog_common(
+    s: &mut Session,
+    hinst: u32,
+    tmpl_p: u32,
+    owner: u32,
+    dlgproc: u32,
+    param: u32,
+    modal: bool,
+    from_resource: bool,
+) -> ApiResult {
     ensure_system_classes(s);
     let bytes = if from_resource {
         let id = match s.read_str_or_id(tmpl_p)? {
             StrOrId::Id(i) => drydock_core::pe::ResId::Id(i),
             StrOrId::Str(n) => drydock_core::pe::ResId::Name(n.to_uppercase()),
         };
-        let Some((ptr, size)) = super::kernel32::find_resource(
-            s,
-            hinst,
-            drydock_core::pe::ResId::Id(drydock_core::pe::RT_DIALOG),
-            id,
-        ) else {
+        let Some((ptr, size)) =
+            super::kernel32::find_resource(s, hinst, drydock_core::pe::ResId::Id(drydock_core::pe::RT_DIALOG), id)
+        else {
             s.set_last_error(1814);
             return Ok(ApiRet::Ret(if modal { 0xffff_ffff } else { 0 }));
         };
         s.mem.read_vec(ptr, size)?
     } else {
-        s.mem.read_vec(tmpl_p, 0x4000).or_else(|_| s.mem.read_vec(tmpl_p, 0x400))?
+        s.mem
+            .read_vec(tmpl_p, 0x4000)
+            .or_else(|_| s.mem.read_vec(tmpl_p, 0x400))?
     };
     let Some(t) = parse_template(&bytes) else {
         return Err(ApiError::Fatal("malformed dialog template".into()));
@@ -565,7 +593,10 @@ fn modal_step(s: &mut Session, hdlg: u32, owner: u32) -> ApiResult {
     }
     let Some(m) = next_message_any(s) else {
         return Ok(ApiRet::Block(Block {
-            wait: WaitKind::Message { objs: vec![], wake_mask: 0x4ff },
+            wait: WaitKind::Message {
+                objs: vec![],
+                wake_mask: 0x4ff,
+            },
             deadline: next_timer_due_pub(s),
             cont: Cont::Dialog(DlgCont::Modal { hdlg, owner }),
         }));
@@ -683,7 +714,11 @@ fn dialog_keyboard(s: &mut Session, hdlg: u32, m: &Msg) -> Result<Option<ApiRet>
                     return Ok(Some(send_command(s, hdlg, c.id, BN_CLICKED)?));
                 }
             }
-            Ok(if m.message == 0x0106 { Some(ApiRet::Ret(1)) } else { None })
+            Ok(if m.message == 0x0106 {
+                Some(ApiRet::Ret(1))
+            } else {
+                None
+            })
         }
         _ => Ok(None),
     }
@@ -743,7 +778,11 @@ pub fn resume(s: &mut Session, c: DlgCont, v: Resume) -> ApiResult {
             }
             let sh = s.process.sys_heap;
             s.heaps.free(sh, buf);
-            let text = if rtf { rtf_to_text(&data) } else { crate::strings::decode_ansi(&data) };
+            let text = if rtf {
+                rtf_to_text(&data)
+            } else {
+                crate::strings::decode_ansi(&data)
+            };
             let lines: Vec<String> = text.replace("\r\n", "\n").split('\n').map(|l| l.to_string()).collect();
             let n = text.len() as u32;
             let st = ctl_state(s, hwnd);
@@ -828,7 +867,12 @@ fn end_dialog(s: &mut Session) -> ApiResult {
 fn get_dlg_item(s: &mut Session) -> ApiResult {
     let [h, id] = s.args::<2>()?;
     Ok(ApiRet::Ret(
-        s.user.windows.values().find(|w| w.parent == h && w.id == id).map(|w| w.hwnd).unwrap_or(0),
+        s.user
+            .windows
+            .values()
+            .find(|w| w.parent == h && w.id == id)
+            .map(|w| w.hwnd)
+            .unwrap_or(0),
     ))
 }
 
@@ -840,7 +884,13 @@ fn get_dlg_ctrl_id(s: &mut Session) -> ApiResult {
 fn set_dlg_item_text_a(s: &mut Session) -> ApiResult {
     let [h, id, p] = s.args::<3>()?;
     let t = s.read_str_opt(p)?.unwrap_or_default();
-    let Some(c) = s.user.windows.values().find(|w| w.parent == h && w.id == id).map(|w| w.hwnd) else {
+    let Some(c) = s
+        .user
+        .windows
+        .values()
+        .find(|w| w.parent == h && w.id == id)
+        .map(|w| w.hwnd)
+    else {
         return Ok(ApiRet::Ret(0));
     };
     let mut b = crate::strings::encode_ansi(&t);
@@ -884,7 +934,13 @@ fn send_dlg_item_message_a(s: &mut Session) -> ApiResult {
 
 fn check_dlg_button(s: &mut Session) -> ApiResult {
     let [h, id, check] = s.args::<3>()?;
-    if let Some(c) = s.user.windows.values().find(|w| w.parent == h && w.id == id).map(|w| w.hwnd) {
+    if let Some(c) = s
+        .user
+        .windows
+        .values()
+        .find(|w| w.parent == h && w.id == id)
+        .map(|w| w.hwnd)
+    {
         ctl_state(s, c).checked = check;
         invalidate(s, c);
     }
@@ -893,7 +949,13 @@ fn check_dlg_button(s: &mut Session) -> ApiResult {
 
 fn is_dlg_button_checked(s: &mut Session) -> ApiResult {
     let [h, id] = s.args::<2>()?;
-    let Some(c) = s.user.windows.values().find(|w| w.parent == h && w.id == id).map(|w| w.hwnd) else {
+    let Some(c) = s
+        .user
+        .windows
+        .values()
+        .find(|w| w.parent == h && w.id == id)
+        .map(|w| w.hwnd)
+    else {
         return Ok(ApiRet::Ret(0));
     };
     Ok(ApiRet::Ret(ctl_state(s, c).checked))
@@ -927,7 +989,10 @@ fn is_dialog_message_a(s: &mut Session) -> ApiResult {
 fn map_dialog_rect(s: &mut Session) -> ApiResult {
     let [_h, p] = s.args::<2>()?;
     let r = s.read_rect(p)?;
-    s.write_rect(p, &Rect::new(dlu_x(r.left), dlu_y(r.top), dlu_x(r.right), dlu_y(r.bottom)))?;
+    s.write_rect(
+        p,
+        &Rect::new(dlu_x(r.left), dlu_y(r.top), dlu_x(r.right), dlu_y(r.bottom)),
+    )?;
     Ok(ApiRet::Ret(1))
 }
 
@@ -958,7 +1023,11 @@ fn control_common(s: &mut Session, hwnd: u32, msg: u32, wp: u32, lp: u32) -> Opt
         }
         0x0031 => Some(Ok(ApiRet::Ret(ctl_state(s, hwnd).font))), // WM_GETFONT
         WM_SETTEXT => {
-            let t = if lp != 0 { s.read_str(lp).unwrap_or_default() } else { String::new() };
+            let t = if lp != 0 {
+                s.read_str(lp).unwrap_or_default()
+            } else {
+                String::new()
+            };
             if let Some(w) = s.user.windows.get_mut(&hwnd) {
                 w.title = t;
             }
@@ -1087,9 +1156,13 @@ fn list_wnd_proc(s: &mut Session, combo: bool) -> ApiResult {
     }
     // Message numbers differ between combo boxes (CB_*) and list boxes (LB_*).
     let (add, insert, del, reset, setsel, getsel, count, gettext, gettextlen, setdata, getdata, find) = if combo {
-        (0x143, 0x14a, 0x144, 0x14b, 0x14e, 0x147, 0x146, 0x148, 0x149, 0x151, 0x150, 0x14c)
+        (
+            0x143, 0x14a, 0x144, 0x14b, 0x14e, 0x147, 0x146, 0x148, 0x149, 0x151, 0x150, 0x14c,
+        )
     } else {
-        (0x180, 0x181, 0x182, 0x184, 0x186, 0x188, 0x18b, 0x189, 0x18a, 0x19a, 0x199, 0x18f)
+        (
+            0x180, 0x181, 0x182, 0x184, 0x186, 0x188, 0x18b, 0x189, 0x18a, 0x19a, 0x199, 0x18f,
+        )
     };
     const ERR: u32 = 0xffff_ffff;
     let r = match msg {
@@ -1102,7 +1175,11 @@ fn list_wnd_proc(s: &mut Session, combo: bool) -> ApiResult {
         m if m == insert => {
             let t = s.read_str(lp)?;
             let st = ctl_state(s, hwnd);
-            let i = if wp as i32 == -1 { st.items.len() } else { (wp as usize).min(st.items.len()) };
+            let i = if wp as i32 == -1 {
+                st.items.len()
+            } else {
+                (wp as usize).min(st.items.len())
+            };
             st.items.insert(i, (t, 0));
             i as u32
         }
@@ -1178,7 +1255,10 @@ fn list_wnd_proc(s: &mut Session, combo: bool) -> ApiResult {
             if let Some(w) = s.window(hwnd).cloned() {
                 let st = ctl_state(s, hwnd).clone();
                 let label = if st.cursel >= 0 {
-                    st.items.get(st.cursel as usize).map(|i| i.0.clone()).unwrap_or_default()
+                    st.items
+                        .get(st.cursel as usize)
+                        .map(|i| i.0.clone())
+                        .unwrap_or_default()
                 } else {
                     String::new()
                 };
@@ -1192,7 +1272,15 @@ fn list_wnd_proc(s: &mut Session, combo: bool) -> ApiResult {
                 } else {
                     st.items.iter().map(|i| i.0.clone()).collect::<Vec<_>>().join("\n")
                 };
-                super::gdi32::draw_label(s, hdc, font, &text, &Rect::new(3, 2, cw - 3, ch - 2), if combo { 0x20 | 0x4 } else { 0x10 }, 0)?;
+                super::gdi32::draw_label(
+                    s,
+                    hdc,
+                    font,
+                    &text,
+                    &Rect::new(3, 2, cw - 3, ch - 2),
+                    if combo { 0x20 | 0x4 } else { 0x10 },
+                    0,
+                )?;
                 super::gdi32::release_dc_handle(s, hdc);
             }
             if let Some(wm) = s.user.windows.get_mut(&hwnd) {
@@ -1256,7 +1344,13 @@ fn stream_call(s: &mut Session, hwnd: u32, es: u32, buf: u32, data: Vec<u8>, rtf
     Ok(ApiRet::call(
         cb,
         vec![cookie.into(), buf.into(), 0x1000u32.into(), (buf + 0x1000).into()],
-        Cont::Dialog(DlgCont::Stream { hwnd, es, buf, data, rtf }),
+        Cont::Dialog(DlgCont::Stream {
+            hwnd,
+            es,
+            buf,
+            data,
+            rtf,
+        }),
     ))
 }
 
@@ -1338,9 +1432,18 @@ pub fn rtf_to_text(data: &[u8]) -> String {
                 // Destination groups that carry no body text.
                 let rest: String = b[i + 1..(i + 16).min(b.len())].iter().collect();
                 let skip = parent
-                    || ["\\fonttbl", "\\colortbl", "\\stylesheet", "\\info", "\\*", "\\pict", "\\header", "\\footer"]
-                        .iter()
-                        .any(|d| rest.starts_with(d));
+                    || [
+                        "\\fonttbl",
+                        "\\colortbl",
+                        "\\stylesheet",
+                        "\\info",
+                        "\\*",
+                        "\\pict",
+                        "\\header",
+                        "\\footer",
+                    ]
+                    .iter()
+                    .any(|d| rest.starts_with(d));
                 skip_depth.push(skip);
                 i += 1;
             }
@@ -1428,17 +1531,39 @@ fn paint_button(s: &mut Session, w: &Window) -> Result<(), ApiError> {
         super::gdi32::fill_solid(s, hdc, &Rect::new(0, 0, cw, ch), face)?;
         let bx = Rect::new(0, (ch - 13) / 2, 13, (ch - 13) / 2 + 13);
         super::gdi32::fill_solid(s, hdc, &bx, 0x808080)?;
-        super::gdi32::fill_solid(s, hdc, &Rect::new(bx.left + 1, bx.top + 1, bx.right - 1, bx.bottom - 1), 0xffffff)?;
+        super::gdi32::fill_solid(
+            s,
+            hdc,
+            &Rect::new(bx.left + 1, bx.top + 1, bx.right - 1, bx.bottom - 1),
+            0xffffff,
+        )?;
         if checked != 0 {
-            super::gdi32::fill_solid(s, hdc, &Rect::new(bx.left + 3, bx.top + 3, bx.right - 3, bx.bottom - 3), 0)?;
+            super::gdi32::fill_solid(
+                s,
+                hdc,
+                &Rect::new(bx.left + 3, bx.top + 3, bx.right - 3, bx.bottom - 3),
+                0,
+            )?;
         }
         super::gdi32::draw_label(s, hdc, font, &w.title, &Rect::new(17, 0, cw, ch), 0x20 | 0x4, 0)?;
     } else {
         super::gdi32::fill_solid(s, hdc, &Rect::new(0, 0, cw, ch), face)?;
-        let (tl, br) = if pressed { (0x404040, 0xffffff) } else { (0xffffff, 0x404040) };
+        let (tl, br) = if pressed {
+            (0x404040, 0xffffff)
+        } else {
+            (0xffffff, 0x404040)
+        };
         draw_edge(s, hdc, cw, ch, tl, br)?;
         let off = pressed as i32;
-        super::gdi32::draw_label(s, hdc, font, &w.title, &Rect::new(off, off, cw + off, ch + off), 0x20 | 0x4 | 0x1, 0)?;
+        super::gdi32::draw_label(
+            s,
+            hdc,
+            font,
+            &w.title,
+            &Rect::new(off, off, cw + off, ch + off),
+            0x20 | 0x4 | 0x1,
+            0,
+        )?;
         if s.user.focus == w.hwnd {
             for r in [
                 Rect::new(4, 4, cw - 4, 5),
@@ -1499,7 +1624,15 @@ fn paint_text_box(s: &mut Session, w: &Window) -> Result<(), ApiError> {
     };
     let scroll = ctl_state(s, w.hwnd).scroll as usize;
     let text: Vec<String> = lines.into_iter().skip(scroll).collect();
-    super::gdi32::draw_label(s, hdc, font, &text.join("\n"), &Rect::new(3, 2, cw - 3, ch - 2), 0x10, 0)?;
+    super::gdi32::draw_label(
+        s,
+        hdc,
+        font,
+        &text.join("\n"),
+        &Rect::new(3, 2, cw - 3, ch - 2),
+        0x10,
+        0,
+    )?;
     super::gdi32::release_dc_handle(s, hdc);
     Ok(())
 }
@@ -1518,7 +1651,15 @@ pub fn paint_dialog_frame(s: &mut Session, hwnd: u32) -> Result<(), ApiError> {
         let cap = Rect::new(ins.left, ins.left, ww - ins.left, ins.top - 1);
         super::gdi32::fill_solid(s, hdc, &cap, 0x6a240a)?;
         let f = super::gdi32::create_font(s, -11, "Tahoma Bold");
-        super::gdi32::draw_label(s, hdc, f, &w.title, &Rect::new(cap.left + 4, cap.top, cap.right, cap.bottom), 0x20 | 0x4, 0xffffff)?;
+        super::gdi32::draw_label(
+            s,
+            hdc,
+            f,
+            &w.title,
+            &Rect::new(cap.left + 4, cap.top, cap.right, cap.bottom),
+            0x20 | 0x4,
+            0xffffff,
+        )?;
     }
     super::gdi32::release_dc_handle(s, hdc);
     Ok(())

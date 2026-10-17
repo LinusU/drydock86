@@ -59,7 +59,12 @@ fn align(v: u32, a: u32) -> u32 {
 
 impl PeBuilder {
     pub fn new() -> Self {
-        PeBuilder { imports: Vec::new(), data: Vec::new(), bss: 0, subsystem: Subsystem::Console }
+        PeBuilder {
+            imports: Vec::new(),
+            data: Vec::new(),
+            bss: 0,
+            subsystem: Subsystem::Console,
+        }
     }
 
     pub fn subsystem(mut self, s: Subsystem) -> Self {
@@ -97,7 +102,11 @@ impl PeBuilder {
         let data_rva = align(idata_rva + idata.len().max(1) as u32, SECT_ALIGN);
         let data_vsize = (self.data.len() as u32 + self.bss).max(4);
         let code_rva = align(data_rva + data_vsize, SECT_ALIGN);
-        let layout = Layout { iat: iat_slots, data: IMAGE_BASE + data_rva, code: IMAGE_BASE + code_rva };
+        let layout = Layout {
+            iat: iat_slots,
+            data: IMAGE_BASE + data_rva,
+            code: IMAGE_BASE + code_rva,
+        };
 
         let mut a = CodeAssembler::new(32).expect("32-bit assembler");
         code(&mut a, &layout).expect("fixture code assembles");

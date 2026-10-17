@@ -167,7 +167,10 @@ fn portcaps() -> Vec<u8> {
     p(&mut b, 36, 1000);
     p(&mut b, 40, 128);
     p(&mut b, 44, 2);
-    let desc: Vec<u8> = "Microsoft Synthesizer".encode_utf16().flat_map(|c| c.to_le_bytes()).collect();
+    let desc: Vec<u8> = "Microsoft Synthesizer"
+        .encode_utf16()
+        .flat_map(|c| c.to_le_bytes())
+        .collect();
     b[52..52 + desc.len()].copy_from_slice(&desc);
     b
 }
@@ -289,7 +292,11 @@ fn port_get_format(s: &mut Session) -> ApiResult {
             s.mem.write_u32(psize, wfx.len() as u32)?;
         }
     } else {
-        let cap = if psize != 0 { s.mem.read_u32(psize)? } else { wfx.len() as u32 };
+        let cap = if psize != 0 {
+            s.mem.read_u32(psize)?
+        } else {
+            wfx.len() as u32
+        };
         let n = (cap as usize).min(wfx.len());
         s.mem.write(pwfx, &wfx[..n])?;
         if psize != 0 {
@@ -358,7 +365,10 @@ fn perf_add_port(s: &mut Session) -> ApiResult {
     }
     let o = if port == 0 {
         // NULL: the default software synthesizer port, activated by the performance.
-        s.com_new(ComKind::DMusic(DmKind::Port(Port { active: true, groups: 1 })))
+        s.com_new(ComKind::DMusic(DmKind::Port(Port {
+            active: true,
+            groups: 1,
+        })))
     } else {
         let o = s.obj_of(port).unwrap_or(0);
         s.com_addref(o);
@@ -571,7 +581,10 @@ fn loader_set_search_directory(s: &mut Session) -> ApiResult {
     if clear != 0 {
         l.scanned.retain(|(c, _)| *c != class && class != GUID_ALL_TYPES);
     }
-    let same = l.dirs.iter().any(|(c, d)| *c == class && d.eq_ignore_ascii_case(&gp.display()));
+    let same = l
+        .dirs
+        .iter()
+        .any(|(c, d)| *c == class && d.eq_ignore_ascii_case(&gp.display()));
     l.dirs.retain(|(c, _)| *c != class);
     l.dirs.push((class, gp.display()));
     set_kind(s, id, DmKind::Loader(l));
@@ -624,13 +637,21 @@ fn read_objdesc(s: &Session, p: u32) -> Result<ObjDesc, ApiError> {
     let valid = s.mem.read_u32(p + 4)?;
     let w = |o: u32, n: u32| -> Result<String, ApiError> {
         let raw = s.mem.read_vec(p + o, n * 2)?;
-        let v: Vec<u16> = raw.chunks_exact(2).map(|c| u16::from_le_bytes([c[0], c[1]])).take_while(|&c| c != 0).collect();
+        let v: Vec<u16> = raw
+            .chunks_exact(2)
+            .map(|c| u16::from_le_bytes([c[0], c[1]]))
+            .take_while(|&c| c != 0)
+            .collect();
         Ok(String::from_utf16_lossy(&v))
     };
     Ok(ObjDesc {
         valid,
         object: if valid & 0x1 != 0 { s.read_guid(p + 8)? } else { [0; 16] },
-        class: if valid & 0x2 != 0 { s.read_guid(p + 24)? } else { [0; 16] },
+        class: if valid & 0x2 != 0 {
+            s.read_guid(p + 24)?
+        } else {
+            [0; 16]
+        },
         name: if valid & 0x10 != 0 { w(56, 64)? } else { String::new() },
         category: if valid & 0x20 != 0 { w(184, 64)? } else { String::new() },
         file: if valid & 0x40 != 0 { w(312, 260)? } else { String::new() },
@@ -683,7 +704,11 @@ fn loader_enum_object(s: &mut Session) -> ApiResult {
     let [_this, rguid, idx, pdesc] = s.args::<4>()?;
     let (_id, l) = loader_self(s)?;
     let class = s.read_guid(rguid)?;
-    let list: Vec<&(Guid, String)> = l.scanned.iter().filter(|(c, _)| *c == class || class == GUID_ALL_TYPES).collect();
+    let list: Vec<&(Guid, String)> = l
+        .scanned
+        .iter()
+        .filter(|(c, _)| *c == class || class == GUID_ALL_TYPES)
+        .collect();
     let Some((c, path)) = list.get(idx as usize) else {
         return Ok(ApiRet::Ret(S_FALSE));
     };
@@ -707,7 +732,10 @@ fn loader_enum_object(s: &mut Session) -> ApiResult {
 
 fn composer_auto_transition(s: &mut Session) -> ApiResult {
     let [_this, _perf, to_seg, cmd, flags] = s.args::<5>()?;
-    s.missing("DirectMusic", format!("AutoTransition(to {to_seg:#x}, cmd {cmd:#x}, flags {flags:#x})"));
+    s.missing(
+        "DirectMusic",
+        format!("AutoTransition(to {to_seg:#x}, cmd {cmd:#x}, flags {flags:#x})"),
+    );
     unimpl("DirectMusic composition")
 }
 

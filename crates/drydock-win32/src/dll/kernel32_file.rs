@@ -96,11 +96,7 @@ pub fn create_file_a(s: &mut Session) -> ApiResult {
     }
 }
 
-fn with_file<T>(
-    s: &mut Session,
-    h: u32,
-    f: impl FnOnce(&mut Session, &mut vfs::OpenFile) -> T,
-) -> Option<T> {
+fn with_file<T>(s: &mut Session, h: u32, f: impl FnOnce(&mut Session, &mut vfs::OpenFile) -> T) -> Option<T> {
     let id = s.objects.lookup(h)?;
     let mut file = match s.objects.get(id) {
         Some(KObj::File(f)) => f.clone(),
@@ -113,7 +109,7 @@ fn with_file<T>(
     Some(r)
 }
 
-pub fn read_file(s: &mut Session, ) -> ApiResult {
+pub fn read_file(s: &mut Session) -> ApiResult {
     let [h, buf, n, pread, ovl] = s.args::<5>()?;
     if ovl != 0 {
         s.missing("ReadFile", "overlapped I/O".into());
@@ -167,7 +163,8 @@ pub fn write_file(s: &mut Session) -> ApiResult {
     let data = s.mem.read_vec(buf, n)?;
     if let Some(KObj::Console { which }) = s.objects.by_handle(h) {
         let w = *which;
-        s.diag.debug_string(format!("[std{w}] {}", String::from_utf8_lossy(&data)));
+        s.diag
+            .debug_string(format!("[std{w}] {}", String::from_utf8_lossy(&data)));
         if pwritten != 0 {
             s.mem.write_u32(pwritten, n)?;
         }

@@ -19,9 +19,16 @@ pub enum ThreadState {
     /// Execute guest code from `regs`.
     Ready,
     /// Inside API `api`; continue with `cont` and `val` before executing guest code.
-    Resume { api: u32, cont: Cont, val: Resume },
+    Resume {
+        api: u32,
+        cont: Cont,
+        val: Resume,
+    },
     /// Blocked inside API `api`.
-    Blocked { api: u32, block: Block },
+    Blocked {
+        api: u32,
+        block: Block,
+    },
     Terminated,
 }
 

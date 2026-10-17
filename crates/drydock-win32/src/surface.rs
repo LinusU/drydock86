@@ -53,7 +53,10 @@ impl Fmt {
         matches!(self, Fmt::Dxt1 | Fmt::Dxt3 | Fmt::Dxt5)
     }
     pub fn has_alpha(self) -> bool {
-        matches!(self, Fmt::Argb1555 | Fmt::Argb4444 | Fmt::Argb8888 | Fmt::Dxt3 | Fmt::Dxt5)
+        matches!(
+            self,
+            Fmt::Argb1555 | Fmt::Argb4444 | Fmt::Argb8888 | Fmt::Dxt3 | Fmt::Dxt5
+        )
     }
     pub fn pitch_for(self, w: u32) -> u32 {
         if self.is_compressed() {
@@ -143,7 +146,11 @@ impl Fmt {
             }
             Fmt::Xrgb1555 | Fmt::Argb1555 => {
                 let v = u16v();
-                let a = if self == Fmt::Argb1555 && v & 0x8000 == 0 { 0 } else { 0xff };
+                let a = if self == Fmt::Argb1555 && v & 0x8000 == 0 {
+                    0
+                } else {
+                    0xff
+                };
                 a << 24 | e5((v >> 10) & 31) << 16 | e5((v >> 5) & 31) << 8 | e5(v & 31)
             }
             Fmt::Argb4444 => {
@@ -271,10 +278,13 @@ impl Session {
         } else {
             self.heaps.process_heap
         };
-        let mem = self
-            .heaps
-            .alloc(&mut self.mem, heap, size, true)
-            .ok_or_else(|| if vram { "out of video memory".to_string() } else { "out of memory".to_string() })?;
+        let mem = self.heaps.alloc(&mut self.mem, heap, size, true).ok_or_else(|| {
+            if vram {
+                "out of video memory".to_string()
+            } else {
+                "out of memory".to_string()
+            }
+        })?;
         let id = self.display.next_id.max(1);
         self.display.next_id = id + 1;
         self.display.surfaces.insert(

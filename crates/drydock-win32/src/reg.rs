@@ -184,8 +184,7 @@ impl Registry {
         let mut count = 0;
         for l in lines {
             let l = l.trim();
-            if l.is_empty() || l.starts_with(';') || l.starts_with("REGEDIT") || l.starts_with("Windows Registry")
-            {
+            if l.is_empty() || l.starts_with(';') || l.starts_with("REGEDIT") || l.starts_with("Windows Registry") {
                 continue;
             }
             if l.starts_with('[') && l.ends_with(']') {
@@ -195,8 +194,8 @@ impl Registry {
                     None => (false, inner),
                 };
                 let mut parts = inner.split('\\');
-                let root = parse_root(parts.next().unwrap_or(""))
-                    .ok_or_else(|| format!("unknown root in [{inner}]"))?;
+                let root =
+                    parse_root(parts.next().unwrap_or("")).ok_or_else(|| format!("unknown root in [{inner}]"))?;
                 let path: Vec<String> = parts.map(|s| s.to_string()).collect();
                 if delete {
                     if let Some((last, parent)) = path.split_last()
@@ -281,10 +280,9 @@ impl Registry {
                             let s = v.data.strip_suffix(&[0]).unwrap_or(&v.data);
                             format!("\"{}\"", escape(&String::from_utf8_lossy(s)))
                         }
-                        REG_DWORD if v.data.len() == 4 => format!(
-                            "dword:{:08x}",
-                            u32::from_le_bytes(v.data[..4].try_into().unwrap())
-                        ),
+                        REG_DWORD if v.data.len() == 4 => {
+                            format!("dword:{:08x}", u32::from_le_bytes(v.data[..4].try_into().unwrap()))
+                        }
                         REG_BINARY => format!("hex:{}", hexlist(&v.data)),
                         t => format!("hex({t:x}):{}", hexlist(&v.data)),
                     };
@@ -361,9 +359,6 @@ mod tests {
         let text = r.export_reg();
         let mut r2 = Registry::new();
         r2.import_reg(text.as_bytes()).unwrap();
-        assert_eq!(
-            r2.key(root, &path).unwrap().values["PATH"].data,
-            b"C:\\App\0"
-        );
+        assert_eq!(r2.key(root, &path).unwrap().values["PATH"].data, b"C:\\App\0");
     }
 }

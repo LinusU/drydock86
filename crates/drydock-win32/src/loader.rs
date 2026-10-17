@@ -227,7 +227,9 @@ pub fn load_builtin(s: &mut Session, name: &'static str) -> Result<u32, String> 
         .map_err(|e| e.to_string())?;
     s.mem.commit(base, size, PAGE_READWRITE).map_err(|e| e.to_string())?;
     s.mem.write_force(base, &img).map_err(|e| e.to_string())?;
-    s.mem.protect(base, thunk_rva, PAGE_READONLY).map_err(|e| e.to_string())?;
+    s.mem
+        .protect(base, thunk_rva, PAGE_READONLY)
+        .map_err(|e| e.to_string())?;
     s.mem
         .protect(base + thunk_rva, size - thunk_rva, PAGE_EXECUTE_READ)
         .map_err(|e| e.to_string())?;
@@ -395,7 +397,12 @@ pub fn load_dll_by_name(s: &mut Session, name: &str, inits: &mut Vec<u32>) -> Re
         return Ok(m.base);
     }
     let path = search_dll(s, name).ok_or_else(|| format!("DLL not found: {name}"))?;
-    if let Some(m) = s.modules.list.values().find(|m| m.path.eq_ignore_ascii_case(&path.display())) {
+    if let Some(m) = s
+        .modules
+        .list
+        .values()
+        .find(|m| m.path.eq_ignore_ascii_case(&path.display()))
+    {
         return Ok(m.base);
     }
     let data = read_guest_file(s, &path)?;
@@ -417,8 +424,7 @@ pub fn load_pe(
     }
     let size = pe.size_of_image.div_ceil(PAGE_SIZE) * PAGE_SIZE;
     let mut img = pe.map_image(file);
-    let has_relocs = pe.dir(pe::DIR_BASERELOC).rva != 0
-        && pe.characteristics & pe::IMAGE_FILE_RELOCS_STRIPPED == 0;
+    let has_relocs = pe.dir(pe::DIR_BASERELOC).rva != 0 && pe.characteristics & pe::IMAGE_FILE_RELOCS_STRIPPED == 0;
     let base = if s.mem.is_free(pe.image_base, size) && pe.image_base >= 0x10000 {
         pe.image_base
     } else if has_relocs {
@@ -439,7 +445,13 @@ pub fn load_pe(
         img[opt + 28..opt + 32].copy_from_slice(&base.to_le_bytes());
     }
     s.mem
-        .reserve(Some(base), size, RegionKind::Image, PAGE_EXECUTE_WRITECOPY, basename(&path.display()))
+        .reserve(
+            Some(base),
+            size,
+            RegionKind::Image,
+            PAGE_EXECUTE_WRITECOPY,
+            basename(&path.display()),
+        )
         .map_err(|e| e.to_string())?;
     s.mem.commit(base, size, PAGE_READWRITE).map_err(|e| e.to_string())?;
     s.mem.write_force(base, &img).map_err(|e| e.to_string())?;
@@ -474,8 +486,7 @@ pub fn load_pe(
     // Imports.
     let imports = pe.imports(&img).map_err(|e| format!("{name}: imports: {e}"))?;
     for dll in &imports {
-        let dbase = load_dll_by_name(s, &dll.dll, inits)
-            .map_err(|e| format!("{name} imports {}: {e}", dll.dll))?;
+        let dbase = load_dll_by_name(s, &dll.dll, inits).map_err(|e| format!("{name} imports {}: {e}", dll.dll))?;
         for ent in &dll.entries {
             let addr = match resolve_export(s, dbase, &ent.name, 0) {
                 Some(a) => a,
@@ -651,7 +662,14 @@ pub fn init_process(s: &mut Session) -> Result<(), String> {
     let mut env: Vec<(String, String)> = vec![
         ("ComSpec".into(), format!("{}\\cmd.exe", w.system_dir)),
         ("COMPUTERNAME".into(), w.computer_name.clone()),
-        ("OS".into(), if w.platform == 2 { "Windows_NT".into() } else { String::new() }),
+        (
+            "OS".into(),
+            if w.platform == 2 {
+                "Windows_NT".into()
+            } else {
+                String::new()
+            },
+        ),
         ("Path".into(), format!("{};{}", w.system_dir, w.windows_dir)),
         ("SystemDrive".into(), "C:".into()),
         ("SystemRoot".into(), w.windows_dir.clone()),
@@ -697,7 +715,9 @@ pub fn init_process(s: &mut Session) -> Result<(), String> {
     m(s, 0x18, ph)?;
     m(s, 0xa4, w.major)?;
     m(s, 0xa8, w.minor)?;
-    s.mem.write_u16(PEB_ADDR + 0xac, w.build as u16).map_err(|e| e.to_string())?;
+    s.mem
+        .write_u16(PEB_ADDR + 0xac, w.build as u16)
+        .map_err(|e| e.to_string())?;
     m(s, 0xb0, w.platform)?;
     m(s, 0x64, 1)?; // NumberOfProcessors
 
@@ -883,11 +903,7 @@ fn next_startup_call(mut st: StartupCont) -> ApiResult {
 pub fn resume_startup(s: &mut Session, st: StartupCont, v: Resume) -> ApiResult {
     let done = &st.calls[st.next - 1];
     if done.check && v.eax() == 0 {
-        let name = s
-            .modules
-            .get(done.args[0])
-            .map(|m| m.name.clone())
-            .unwrap_or_default();
+        let name = s.modules.get(done.args[0]).map(|m| m.name.clone()).unwrap_or_default();
         return Err(ApiError::Fatal(format!(
             "DllMain of {name} failed process attach (STATUS_DLL_INIT_FAILED)"
         )));

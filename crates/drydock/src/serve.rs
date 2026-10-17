@@ -101,7 +101,9 @@ fn run_args_from_json(p: &Value) -> Result<RunArgs> {
         }
     }
     let cmd = RunArgs::augment_args(clap::Command::new("open").no_binary_name(false));
-    let m = cmd.try_get_matches_from(argv).map_err(|e| anyhow!("{}", e.to_string().trim()))?;
+    let m = cmd
+        .try_get_matches_from(argv)
+        .map_err(|e| anyhow!("{}", e.to_string().trim()))?;
     Ok(RunArgs::from_arg_matches(&m)?)
 }
 
@@ -135,7 +137,10 @@ fn hex_decode(s: &str) -> Result<Vec<u8>> {
     if s.len() % 2 != 0 {
         bail!("odd-length hex string");
     }
-    (0..s.len()).step_by(2).map(|i| u8::from_str_radix(&s[i..i + 2], 16).map_err(Into::into)).collect()
+    (0..s.len())
+        .step_by(2)
+        .map(|i| u8::from_str_radix(&s[i..i + 2], 16).map_err(Into::into))
+        .collect()
 }
 
 fn hex_encode(b: &[u8]) -> String {
@@ -149,7 +154,11 @@ fn base64(data: &[u8]) -> String {
         let n = (c[0] as u32) << 16 | (*c.get(1).unwrap_or(&0) as u32) << 8 | *c.get(2).unwrap_or(&0) as u32;
         out.push(T[(n >> 18) as usize & 63] as char);
         out.push(T[(n >> 12) as usize & 63] as char);
-        out.push(if c.len() > 1 { T[(n >> 6) as usize & 63] as char } else { '=' });
+        out.push(if c.len() > 1 {
+            T[(n >> 6) as usize & 63] as char
+        } else {
+            '='
+        });
         out.push(if c.len() > 2 { T[n as usize & 63] as char } else { '=' });
     }
     out
@@ -157,7 +166,9 @@ fn base64(data: &[u8]) -> String {
 
 impl Server {
     fn session(&mut self) -> Result<&mut Open> {
-        self.open.as_mut().ok_or_else(|| anyhow!("no session is open (call \"open\" first)"))
+        self.open
+            .as_mut()
+            .ok_or_else(|| anyhow!("no session is open (call \"open\" first)"))
     }
 
     fn handle(&mut self, method: &str, p: &Value) -> Result<Value> {
@@ -279,11 +290,18 @@ impl Server {
                 let data = hex_decode(p["hex"].as_str().ok_or_else(|| anyhow!("missing hex"))?)?;
                 let o = self.session()?;
                 o.d.s.mem.write_force(addr, &data).map_err(|e| anyhow!("{e:?}"))?;
-                o.d.s.diag.mutations.push(format!("t={}ns write {} bytes at {addr:#x}", o.d.s.clock.now_ns(), data.len()));
+                o.d.s.diag.mutations.push(format!(
+                    "t={}ns write {} bytes at {addr:#x}",
+                    o.d.s.clock.now_ns(),
+                    data.len()
+                ));
                 Ok(json!({ "written": data.len() }))
             }
             "memory.search" => {
-                let needle = match (p.get("hex").and_then(|v| v.as_str()), p.get("text").and_then(|v| v.as_str())) {
+                let needle = match (
+                    p.get("hex").and_then(|v| v.as_str()),
+                    p.get("text").and_then(|v| v.as_str()),
+                ) {
                     (Some(h), _) => hex_decode(h)?,
                     (None, Some(t)) => t.as_bytes().to_vec(),
                     _ => bail!("give hex or text"),
@@ -300,7 +318,12 @@ impl Server {
                     Some(_) => u32_param(p, "tid")?,
                     None => o.d.s.sched.current.ok_or_else(|| anyhow!("no current thread"))?,
                 };
-                let t = o.d.s.sched.threads.get(&tid).ok_or_else(|| anyhow!("no thread {tid}"))?;
+                let t =
+                    o.d.s
+                        .sched
+                        .threads
+                        .get(&tid)
+                        .ok_or_else(|| anyhow!("no thread {tid}"))?;
                 Ok(json!({ "tid": tid, "regs": t.regs }))
             }
             "regs.set" => {
@@ -310,7 +333,12 @@ impl Server {
                     Some(_) => u32_param(p, "tid")?,
                     None => o.d.s.sched.current.ok_or_else(|| anyhow!("no current thread"))?,
                 };
-                let t = o.d.s.sched.threads.get_mut(&tid).ok_or_else(|| anyhow!("no thread {tid}"))?;
+                let t =
+                    o.d.s
+                        .sched
+                        .threads
+                        .get_mut(&tid)
+                        .ok_or_else(|| anyhow!("no thread {tid}"))?;
                 let mut regs = serde_json::to_value(&t.regs)?;
                 let changes = p["regs"].as_object().ok_or_else(|| anyhow!("regs must be an object"))?;
                 for (k, v) in changes {
@@ -321,7 +349,11 @@ impl Server {
                 }
                 t.regs = serde_json::from_value(regs)?;
                 o.d.s.reload_regs().map_err(|e| anyhow!(e))?;
-                o.d.s.diag.mutations.push(format!("t={}ns set registers {:?} of thread {tid}", o.d.s.clock.now_ns(), changes.keys().collect::<Vec<_>>()));
+                o.d.s.diag.mutations.push(format!(
+                    "t={}ns set registers {:?} of thread {tid}",
+                    o.d.s.clock.now_ns(),
+                    changes.keys().collect::<Vec<_>>()
+                ));
                 Ok(json!({}))
             }
             "breakpoint.add" => {
@@ -331,7 +363,13 @@ impl Server {
             }
             "breakpoint.remove" => {
                 let addr = u32_param(p, "addr")?;
-                let removed = self.session()?.d.s.cpu.remove_breakpoint(addr).map_err(|e| anyhow!(e))?;
+                let removed = self
+                    .session()?
+                    .d
+                    .s
+                    .cpu
+                    .remove_breakpoint(addr)
+                    .map_err(|e| anyhow!(e))?;
                 Ok(json!({ "removed": removed }))
             }
             "watchpoint.add" => {
@@ -340,7 +378,10 @@ impl Server {
                 let write = p.get("write").and_then(|v| v.as_bool()).unwrap_or(true);
                 let read = p.get("read").and_then(|v| v.as_bool()).unwrap_or(false);
                 let o = self.session()?;
-                o.d.s.cpu.add_watchpoint(addr, len, write, read).map_err(|e| anyhow!(e))?;
+                o.d.s
+                    .cpu
+                    .add_watchpoint(addr, len, write, read)
+                    .map_err(|e| anyhow!(e))?;
                 Ok(json!({}))
             }
             "api_break.add" => {
@@ -385,7 +426,12 @@ impl Server {
             "savepoint.restore" => {
                 let name = p["name"].as_str().ok_or_else(|| anyhow!("missing name"))?;
                 let o = self.session()?;
-                let cp = o.ctx.savepoints.get(name).ok_or_else(|| anyhow!("no savepoint {name:?}"))?.clone();
+                let cp = o
+                    .ctx
+                    .savepoints
+                    .get(name)
+                    .ok_or_else(|| anyhow!("no savepoint {name:?}"))?
+                    .clone();
                 o.d.s.restore(&cp, true).map_err(|e| anyhow!(e))?;
                 o.d.reanchor();
                 Ok(serde_json::to_value(&cp.info)?)
@@ -411,7 +457,11 @@ impl Server {
                 let path = PathBuf::from(p["path"].as_str().ok_or_else(|| anyhow!("missing path"))?);
                 let cp = Checkpoint::read_from(&path).map_err(|e| anyhow!(e))?;
                 let o = self.session()?;
-                let sha = o.d.s.modules.get(o.d.s.process.exe_module).and_then(|m| m.sha256.clone());
+                let sha =
+                    o.d.s
+                        .modules
+                        .get(o.d.s.process.exe_module)
+                        .and_then(|m| m.sha256.clone());
                 if cp.info.exe_sha256 != sha {
                     bail!("checkpoint was taken with a different executable");
                 }
@@ -444,7 +494,10 @@ impl Server {
         if let Some(path) = &args.replay_input {
             launch::schedule_replay(&mut s, path)?;
         }
-        let artifacts = args.artifacts.clone().unwrap_or_else(|| PathBuf::from("local/artifacts/serve"));
+        let artifacts = args
+            .artifacts
+            .clone()
+            .unwrap_or_else(|| PathBuf::from("local/artifacts/serve"));
         std::fs::create_dir_all(&artifacts)?;
         *self.cancel.lock().unwrap() = Some(s.host.cancel.clone());
         let info = json!({
@@ -454,7 +507,12 @@ impl Server {
             "artifacts": artifacts,
         });
         let pacing = args.pacing;
-        self.open = Some(Open { d: Driver::new(s, pacing), args, ctx: Ctx::default(), artifacts });
+        self.open = Some(Open {
+            d: Driver::new(s, pacing),
+            args,
+            ctx: Ctx::default(),
+            artifacts,
+        });
         Ok(info)
     }
 
@@ -472,7 +530,12 @@ impl Server {
         let deadline = seconds.map(|s| start_ns + (s * 1e9) as u64).unwrap_or(u64::MAX);
         let frame_goal = frames.map(|n| o.d.s.frames_presented + n);
         let stop = if let Some(n) = max_insns {
-            o.d.s.run(RunLimit { until_ns: deadline, max_insns: Some(n), stop_on_present: until_present, jump_idle: true })
+            o.d.s.run(RunLimit {
+                until_ns: deadline,
+                max_insns: Some(n),
+                stop_on_present: until_present,
+                jump_idle: true,
+            })
         } else {
             loop {
                 let now = o.d.s.clock.now_ns();
@@ -522,7 +585,10 @@ pub fn serve_stdio() -> Result<()> {
                 let req: Value = match serde_json::from_str(&line) {
                     Ok(v) => v,
                     Err(e) => {
-                        send(&out, &json!({ "id": null, "error": { "code": "parse", "message": e.to_string() } }));
+                        send(
+                            &out,
+                            &json!({ "id": null, "error": { "code": "parse", "message": e.to_string() } }),
+                        );
                         continue;
                     }
                 };
@@ -531,7 +597,10 @@ pub fn serve_stdio() -> Result<()> {
                     if let Some(f) = &flag {
                         f.store(true, Ordering::SeqCst);
                     }
-                    send(&out, &json!({ "id": req["id"], "result": { "cancelled": flag.is_some() } }));
+                    send(
+                        &out,
+                        &json!({ "id": req["id"], "result": { "cancelled": flag.is_some() } }),
+                    );
                     continue;
                 }
                 if tx.send(req).is_err() {
@@ -550,10 +619,15 @@ pub fn serve_stdio() -> Result<()> {
                 Some(o) if !o.args.no_persist => o.d.s.persist().map(|_| json!({})).map_err(|e| e.to_string()),
                 _ => Ok(json!({})),
             };
-            send(&out, &match r {
-                Ok(v) => json!({ "id": id, "result": v }),
-                Err(e) => json!({ "id": id, "error": { "code": "failed", "message": format!("writing the overlay: {e}") } }),
-            });
+            send(
+                &out,
+                &match r {
+                    Ok(v) => json!({ "id": id, "result": v }),
+                    Err(e) => {
+                        json!({ "id": id, "error": { "code": "failed", "message": format!("writing the overlay: {e}") } })
+                    }
+                },
+            );
             break;
         }
         let res = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| srv.handle(&method, &params)));

@@ -2,12 +2,12 @@
 
 use crate::api::*;
 use crate::diag::Severity;
+use crate::export;
 use crate::loader::{self, StartupCall};
 use crate::objects::{CURRENT_PROCESS, CURRENT_THREAD, KObj};
 use crate::sched::ThreadState;
 use crate::session::Session;
 use crate::sync::{WAIT_FAILED, WAIT_TIMEOUT};
-use crate::export;
 use drydock_core::mem::*;
 use drydock_core::pe::{ImportName, ResId};
 use serde::{Deserialize, Serialize};
@@ -308,8 +308,8 @@ fn set_priority_class(s: &mut Session) -> ApiResult {
 
 fn create_thread(s: &mut Session) -> ApiResult {
     let [_sa, stack, start, param, flags, ptid] = s.args::<6>()?;
-    let tid = loader::create_thread(s, start, param, stack.max(0x10_0000), flags & 4 != 0, false)
-        .map_err(ApiError::Fatal)?;
+    let tid =
+        loader::create_thread(s, start, param, stack.max(0x10_0000), flags & 4 != 0, false).map_err(ApiError::Fatal)?;
     let obj = s.sched.threads[&tid].obj;
     let h = s.objects.open(obj);
     if ptid != 0 {
@@ -625,7 +625,14 @@ fn release_semaphore(s: &mut Session) -> ApiResult {
 
 pub fn wait_objects(s: &mut Session, objs: Vec<u32>, all: bool, ms: u32) -> ApiResult {
     let tid = s.tid();
-    if let Some(r) = crate::sync::try_satisfy(s, tid, &WaitKind::Objects { objs: objs.clone(), all }) {
+    if let Some(r) = crate::sync::try_satisfy(
+        s,
+        tid,
+        &WaitKind::Objects {
+            objs: objs.clone(),
+            all,
+        },
+    ) {
         return Ok(ApiRet::Ret(r.eax()));
     }
     if ms == 0 {
@@ -884,11 +891,7 @@ fn virtual_alloc(s: &mut Session) -> ApiResult {
         } else {
             None
         };
-        let span = if let Some(b) = base {
-            addr + size - b
-        } else {
-            size
-        };
+        let span = if let Some(b) = base { addr + size - b } else { size };
         match s.mem.reserve(base, span, RegionKind::Private, prot, "VirtualAlloc") {
             Ok(b) => {
                 if ty & MEM_COMMIT != 0 {
@@ -1094,11 +1097,7 @@ fn heap_realloc(s: &mut Session) -> ApiResult {
 fn heap_size(s: &mut Session) -> ApiResult {
     let [h, _flags, p] = s.args::<3>()?;
     Ok(ApiRet::Ret(
-        s.heaps
-            .heaps
-            .get(&h)
-            .and_then(|x| x.size_of(p))
-            .unwrap_or(0xffff_ffff),
+        s.heaps.heaps.get(&h).and_then(|x| x.size_of(p)).unwrap_or(0xffff_ffff),
     ))
 }
 fn heap_validate(s: &mut Session) -> ApiResult {
@@ -1139,7 +1138,10 @@ fn global_free(s: &mut Session) -> ApiResult {
 fn global_realloc(s: &mut Session) -> ApiResult {
     let [p, size, flags] = s.args::<3>()?;
     let ph = s.heaps.process_heap;
-    match s.heaps.realloc(&mut s.mem, ph, p, size.max(1), flags & GMEM_ZEROINIT != 0, false) {
+    match s
+        .heaps
+        .realloc(&mut s.mem, ph, p, size.max(1), flags & GMEM_ZEROINIT != 0, false)
+    {
         Some(n) => Ok(ApiRet::Ret(n)),
         None => {
             s.set_last_error(ERROR_NOT_ENOUGH_MEMORY);
@@ -1720,7 +1722,11 @@ pub static KERNEL32_EXPORTS: &[ExportDef] = &[
     export!("HeapSize", 3, heap_size),
     export!("HeapValidate", 3, heap_validate),
     export!("InitializeCriticalSection", 1, initialize_critical_section),
-    export!("InitializeCriticalSectionAndSpinCount", 2, initialize_critical_section_and_spin_count),
+    export!(
+        "InitializeCriticalSectionAndSpinCount",
+        2,
+        initialize_critical_section_and_spin_count
+    ),
     export!("InterlockedCompareExchange", 3, interlocked_compare_exchange),
     export!("InterlockedDecrement", 1, interlocked_decrement),
     export!("InterlockedExchange", 2, interlocked_exchange),
@@ -1810,4 +1816,3 @@ pub static KERNEL32_EXPORTS: &[ExportDef] = &[
     export!("lstrlenA", 1, lstrlen_a),
     export!("lstrlenW", 1, lstrlen_w),
 ];
-

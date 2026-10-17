@@ -96,14 +96,7 @@ impl Objects {
     pub fn create(&mut self, obj: KObj, name: Option<String>) -> ObjId {
         let id = self.next_obj;
         self.next_obj += 1;
-        self.objs.insert(
-            id,
-            ObjEntry {
-                obj,
-                refs: 0,
-                name,
-            },
-        );
+        self.objs.insert(id, ObjEntry { obj, refs: 0, name });
         id
     }
 

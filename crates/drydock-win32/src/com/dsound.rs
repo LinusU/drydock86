@@ -46,7 +46,10 @@ pub struct Wfx {
 
 impl Wfx {
     fn valid(&self) -> bool {
-        self.tag == 1 && (1..=2).contains(&self.channels) && (self.bits == 8 || self.bits == 16) && (100..=200_000).contains(&self.rate)
+        self.tag == 1
+            && (1..=2).contains(&self.channels)
+            && (self.bits == 8 || self.bits == 16)
+            && (100..=200_000).contains(&self.rate)
             && self.block == self.channels * self.bits / 8
     }
     fn bytes(&self) -> Vec<u8> {
@@ -245,7 +248,9 @@ fn settle_due(s: &Session, id: u32, now: u64) -> bool {
     if !b.looping && abs >= b.frames().max(1) {
         return true;
     }
-    b.notify.iter().any(|(off, _)| *off != 0xffff_ffff && b.passed(*off, abs))
+    b.notify
+        .iter()
+        .any(|(off, _)| *off != 0xffff_ffff && b.passed(*off, abs))
 }
 
 /// Bring a buffer's state up to virtual time `now`: end one-shot playback, fire
@@ -265,7 +270,13 @@ fn settle(s: &mut Session, id: u32, now: u64) {
     let fire: Vec<u32> = b
         .notify
         .iter()
-        .filter(|(off, _)| if *off == 0xffff_ffff { stopped } else { b.passed(*off, end) })
+        .filter(|(off, _)| {
+            if *off == 0xffff_ffff {
+                stopped
+            } else {
+                b.passed(*off, end)
+            }
+        })
         .map(|(_, e)| *e)
         .collect();
     let bm = s.dsbuf_mut(id).unwrap();
@@ -363,7 +374,11 @@ pub fn service(s: &mut Session) {
 }
 
 fn db_to_gain(v: i32) -> f32 {
-    if v <= -10000 { 0.0 } else { 10f32.powf(v as f32 / 2000.0) }
+    if v <= -10000 {
+        0.0
+    } else {
+        10f32.powf(v as f32 / 2000.0)
+    }
 }
 
 fn sub(a: [f32; 3], b: [f32; 3]) -> [f32; 3] {
@@ -373,7 +388,11 @@ fn dot(a: [f32; 3], b: [f32; 3]) -> f32 {
     a[0] * b[0] + a[1] * b[1] + a[2] * b[2]
 }
 fn cross(a: [f32; 3], b: [f32; 3]) -> [f32; 3] {
-    [a[1] * b[2] - a[2] * b[1], a[2] * b[0] - a[0] * b[2], a[0] * b[1] - a[1] * b[0]]
+    [
+        a[1] * b[2] - a[2] * b[1],
+        a[2] * b[0] - a[0] * b[2],
+        a[0] * b[1] - a[1] * b[0],
+    ]
 }
 fn norm(a: [f32; 3]) -> [f32; 3] {
     let l = dot(a, a).sqrt().max(1e-12);
@@ -384,11 +403,19 @@ fn norm(a: [f32; 3]) -> [f32; 3] {
 fn spatial(g: &DSoundGlobal, b: &DsBuffer) -> (f32, f32, f32) {
     let base = db_to_gain(b.volume) * db_to_gain(g.primary_volume);
     let pan = b.pan.clamp(-10000, 10000);
-    let (mut l, mut r) = if pan < 0 { (1.0, db_to_gain(pan)) } else { (db_to_gain(-pan), 1.0) };
+    let (mut l, mut r) = if pan < 0 {
+        (1.0, db_to_gain(pan))
+    } else {
+        (db_to_gain(-pan), 1.0)
+    };
     let mut pitch = 1.0;
     if b.flags & DSBCAPS_CTRL3D != 0 && b.p3d.mode != 2 {
         let lis = &g.listener;
-        let rel = if b.p3d.mode == 1 { b.p3d.position } else { sub(b.p3d.position, lis.position) };
+        let rel = if b.p3d.mode == 1 {
+            b.p3d.position
+        } else {
+            sub(b.p3d.position, lis.position)
+        };
         let d = dot(rel, rel).sqrt() * lis.distance_factor;
         let minr = b.p3d.min_distance * lis.distance_factor;
         let maxr = b.p3d.max_distance * lis.distance_factor;
@@ -398,7 +425,11 @@ fn spatial(g: &DSoundGlobal, b: &DsBuffer) -> (f32, f32, f32) {
             att = 0.0;
         }
         // Azimuth relative to the listener's right vector (left-handed coordinates).
-        let (front, top) = if b.p3d.mode == 1 { ([0.0, 0.0, 1.0], [0.0, 1.0, 0.0]) } else { (norm(lis.front), norm(lis.top)) };
+        let (front, top) = if b.p3d.mode == 1 {
+            ([0.0, 0.0, 1.0], [0.0, 1.0, 0.0])
+        } else {
+            (norm(lis.front), norm(lis.top))
+        };
         let right = norm(cross(top, front));
         let x = if d > 1e-6 { dot(norm(rel), right) } else { 0.0 };
         let p = (x.clamp(-1.0, 1.0) + 1.0) * std::f32::consts::FRAC_PI_4;
@@ -454,7 +485,11 @@ fn mix_to(s: &mut Session, now: u64) {
         let Ok(data) = s.mem.slice(b.mem, b.size) else { continue };
         // Output samples before the buffer's anchor (it started inside this window)
         // stay silent; positions then advance by a fixed step per output sample.
-        let k0 = if b.anchor_ns > t0 { ((b.anchor_ns - t0) as f64 * rate / 1e9).ceil() as usize } else { 0 };
+        let k0 = if b.anchor_ns > t0 {
+            ((b.anchor_ns - t0) as f64 * rate / 1e9).ceil() as usize
+        } else {
+            0
+        };
         if k0 >= n {
             continue;
         }
@@ -487,7 +522,11 @@ fn mix_to(s: &mut Session, now: u64) {
                 pos %= frames;
             }
             let i0 = pos as usize;
-            let i1 = if i0 >= last { if b.looping { 0 } else { i0 } } else { i0 + 1 };
+            let i1 = if i0 >= last {
+                if b.looping { 0 } else { i0 }
+            } else {
+                i0 + 1
+            };
             let f = (pos - i0 as f64) as f32;
             let (l0, l1) = (read(i0, 0), read(i1, 0));
             let (r0, r1) = if stereo { (read(i0, 1), read(i1, 1)) } else { (l0, l1) };
@@ -559,8 +598,18 @@ fn cstr(t: &str) -> CallArg {
 fn direct_sound_enumerate_a(s: &mut Session) -> ApiResult {
     let [cb, ctx] = s.args::<2>()?;
     let items = vec![
-        vec![CallArg::Val(0), cstr("Primary Sound Driver"), cstr(""), CallArg::Val(ctx)],
-        vec![CallArg::Buf(DEVICE_GUID.to_vec()), cstr("Drydock Audio"), cstr("drydock.vxd"), CallArg::Val(ctx)],
+        vec![
+            CallArg::Val(0),
+            cstr("Primary Sound Driver"),
+            cstr(""),
+            CallArg::Val(ctx),
+        ],
+        vec![
+            CallArg::Buf(DEVICE_GUID.to_vec()),
+            cstr("Drydock Audio"),
+            cstr("drydock.vxd"),
+            CallArg::Val(ctx),
+        ],
     ];
     enum_callbacks(cb, items, 0, DS_OK)
 }
@@ -727,7 +776,10 @@ fn buf_self(s: &mut Session) -> Result<(u32, DsBuffer), ApiError> {
     let id = s.this_obj()?;
     let now = s.clock.now_ns();
     settle(s, id, now);
-    s.dsbuf(id).cloned().map(|b| (id, b)).ok_or_else(|| ApiError::Fatal("not a sound buffer".into()))
+    s.dsbuf(id)
+        .cloned()
+        .map(|b| (id, b))
+        .ok_or_else(|| ApiError::Fatal("not a sound buffer".into()))
 }
 
 fn buf_get_caps(s: &mut Session) -> ApiResult {
@@ -834,7 +886,11 @@ fn buf_set_format(s: &mut Session) -> ApiResult {
 fn buf_get_status(s: &mut Session) -> ApiResult {
     let [_this, p] = s.args::<2>()?;
     let (_id, b) = buf_self(s)?;
-    let st = if b.playing { 1 | if b.looping { 4 } else { 0 } } else { 0 };
+    let st = if b.playing {
+        1 | if b.looping { 4 } else { 0 }
+    } else {
+        0
+    };
     s.mem.write_u32(p, st)?;
     Ok(ApiRet::Ret(DS_OK))
 }
@@ -868,7 +924,12 @@ fn buf_stop(s: &mut Session) -> ApiResult {
     if b.playing && !b.primary {
         let frames = b.frames().max(1);
         let f = b.frame_at(now) % frames;
-        let stop_events: Vec<u32> = b.notify.iter().filter(|(o, _)| *o == 0xffff_ffff).map(|(_, e)| *e).collect();
+        let stop_events: Vec<u32> = b
+            .notify
+            .iter()
+            .filter(|(o, _)| *o == 0xffff_ffff)
+            .map(|(_, e)| *e)
+            .collect();
         let bm = s.dsbuf_mut(id).unwrap();
         bm.playing = false;
         bm.anchor_frame = f;
@@ -1442,7 +1503,9 @@ impl Session {
                 let (l, r, pitch) = spatial(g, b);
                 let data = self.mem.read_vec(b.mem, b.size).unwrap_or_default();
                 let frames = b.frames() as usize;
-                let peak = (0..frames).map(|f| sample(&data, &b.fmt, f, 0).abs()).fold(0.0, f32::max);
+                let peak = (0..frames)
+                    .map(|f| sample(&data, &b.fmt, f, 0).abs())
+                    .fold(0.0, f32::max);
                 VoiceInfo {
                     peak,
                     bytes: b.size,
@@ -1461,7 +1524,12 @@ impl Session {
                 }
             })
             .collect();
-        AudioInfo { frames_mixed: g.frames_mixed, primary_volume: g.primary_volume, listener: g.listener, voices }
+        AudioInfo {
+            frames_mixed: g.frames_mixed,
+            primary_volume: g.primary_volume,
+            listener: g.listener,
+            voices,
+        }
     }
 }
 
@@ -1482,13 +1550,28 @@ mod tests {
 
     fn looping_buffer(s: &mut Session, frames: u32, rate: u32, notify: Vec<(u32, u32)>) -> u32 {
         let size = frames * 2;
-        let mem = s.mem.alloc(None, size.max(0x1000), drydock_core::mem::RegionKind::Private, drydock_core::mem::PAGE_READWRITE, "dsb").unwrap();
+        let mem = s
+            .mem
+            .alloc(
+                None,
+                size.max(0x1000),
+                drydock_core::mem::RegionKind::Private,
+                drydock_core::mem::PAGE_READWRITE,
+                "dsb",
+            )
+            .unwrap();
         let b = DsBuffer {
             primary: false,
             flags: DSBCAPS_CTRLVOLUME | DSBCAPS_CTRLPOSITIONNOTIFY,
             mem,
             size,
-            fmt: Wfx { tag: 1, channels: 1, rate, bits: 16, block: 2 },
+            fmt: Wfx {
+                tag: 1,
+                channels: 1,
+                rate,
+                bits: 16,
+                block: 2,
+            },
             mem_owner: 0,
             playing: true,
             looping: true,
@@ -1514,7 +1597,13 @@ mod tests {
     fn play_cursor_does_not_drift_under_frequent_service() {
         let mut s = crate::testutil::session_with(&drydock_fixtures::exit_with(0));
         s.com.dsound.created = true;
-        let (ev, _) = s.objects.create_handle(crate::objects::KObj::Event { signaled: false, manual: true }, None);
+        let (ev, _) = s.objects.create_handle(
+            crate::objects::KObj::Event {
+                signaled: false,
+                manual: true,
+            },
+            None,
+        );
         // 1000-frame loop with a notification at its middle.
         let id = looping_buffer(&mut s, 1000, 22050, vec![(1000, ev)]);
         let mut t = 0;
@@ -1524,7 +1613,11 @@ mod tests {
             service(&mut s);
         }
         let b = s.dsbuf(id).unwrap();
-        assert_eq!(b.frame_at(1_000_000_000) % 1000, 22050 % 1000, "cursor position after 1 s");
+        assert_eq!(
+            b.frame_at(1_000_000_000) % 1000,
+            22050 % 1000,
+            "cursor position after 1 s"
+        );
     }
 
     #[test]
@@ -1535,7 +1628,16 @@ mod tests {
         s.com.dsound.created = true;
         // 100 frames of mono 16-bit DC at half scale.
         let size = 200;
-        let mem = s.mem.alloc(None, 0x1000, drydock_core::mem::RegionKind::Private, drydock_core::mem::PAGE_READWRITE, "dsb").unwrap();
+        let mem = s
+            .mem
+            .alloc(
+                None,
+                0x1000,
+                drydock_core::mem::RegionKind::Private,
+                drydock_core::mem::PAGE_READWRITE,
+                "dsb",
+            )
+            .unwrap();
         let data: Vec<u8> = (0..100).flat_map(|_| 0x4000i16.to_le_bytes()).collect();
         s.mem.write(mem, &data).unwrap();
         let b = DsBuffer {
@@ -1543,7 +1645,13 @@ mod tests {
             flags: DSBCAPS_CTRLVOLUME,
             mem,
             size,
-            fmt: Wfx { tag: 1, channels: 1, rate: 22050, bits: 16, block: 2 },
+            fmt: Wfx {
+                tag: 1,
+                channels: 1,
+                rate: 22050,
+                bits: 16,
+                block: 2,
+            },
             mem_owner: 0,
             playing: true,
             looping: true,

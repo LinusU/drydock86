@@ -91,13 +91,7 @@ fn span_for(size: u32) -> u32 {
 }
 
 impl Heaps {
-    pub fn create(
-        &mut self,
-        mem: &mut AddressSpace,
-        flags: u32,
-        initial: u32,
-        max: u32,
-    ) -> MemResult<u32> {
+    pub fn create(&mut self, mem: &mut AddressSpace, flags: u32, initial: u32, max: u32) -> MemResult<u32> {
         let seg = initial.max(0x10_0000).div_ceil(0x10000) * 0x10000;
         let base = mem.alloc(None, seg, RegionKind::Private, PAGE_READWRITE, "heap")?;
         let mut h = Heap {
@@ -125,9 +119,7 @@ impl Heaps {
                     return None;
                 }
                 let seg = (need + 0x1000).max(0x10_0000).div_ceil(0x10000) * 0x10000;
-                let base = mem
-                    .alloc(None, seg, RegionKind::Private, PAGE_READWRITE, "heap")
-                    .ok()?;
+                let base = mem.alloc(None, seg, RegionKind::Private, PAGE_READWRITE, "heap").ok()?;
                 h.segments.push((base, seg));
                 h.insert_free(base, seg);
                 h.take_free(need)?

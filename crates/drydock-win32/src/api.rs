@@ -151,7 +151,10 @@ pub struct Block {
 #[derive(Debug, Clone, Copy, Serialize, Deserialize)]
 pub enum Resume {
     /// Guest callback returned EAX (and EDX).
-    Returned { eax: u32, edx: u32 },
+    Returned {
+        eax: u32,
+        edx: u32,
+    },
     /// Wait satisfied by object index `i` (WAIT_OBJECT_0 + i), or a message (index == n).
     Signaled(u32),
     TimedOut,

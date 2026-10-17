@@ -30,8 +30,14 @@ pub fn run(exe: &Path, json: bool) -> Result<()> {
     println!("  timestamp   {:#x}", pe.timestamp);
     println!("  image base  {:#010x}  size {:#x}", pe.image_base, pe.size_of_image);
     println!("  entry       {:#010x}", pe.image_base + pe.entry_rva);
-    println!("  subsystem   {} ({}.{})", pe.subsystem, pe.major_subsystem, pe.minor_subsystem);
-    println!("  relocations {}", if pe.dir(5).rva != 0 { "present" } else { "stripped" });
+    println!(
+        "  subsystem   {} ({}.{})",
+        pe.subsystem, pe.major_subsystem, pe.minor_subsystem
+    );
+    println!(
+        "  relocations {}",
+        if pe.dir(5).rva != 0 { "present" } else { "stripped" }
+    );
     println!("  sections");
     for s in &pe.sections {
         println!(

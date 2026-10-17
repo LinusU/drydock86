@@ -23,13 +23,23 @@ impl Client {
             .unwrap();
         let stdin = child.stdin.take().unwrap();
         let stdout = BufReader::new(child.stdout.take().unwrap());
-        Client { child, stdin, stdout, next: 1 }
+        Client {
+            child,
+            stdin,
+            stdout,
+            next: 1,
+        }
     }
 
     fn call(&mut self, method: &str, params: Value) -> Result<Value, Value> {
         let id = self.next;
         self.next += 1;
-        writeln!(self.stdin, "{}", json!({ "id": id, "method": method, "params": params })).unwrap();
+        writeln!(
+            self.stdin,
+            "{}",
+            json!({ "id": id, "method": method, "params": params })
+        )
+        .unwrap();
         let mut line = String::new();
         self.stdout.read_line(&mut line).unwrap();
         let v: Value = serde_json::from_str(&line).unwrap();
@@ -76,7 +86,10 @@ fn protocol_session_lifecycle() {
     assert_eq!(hello["protocol"], 1);
     assert!(c.call("run", json!({ "seconds": 1 })).is_err(), "run before open fails");
 
-    c.ok("open", json!({ "exe": "COUNT.EXE", "root": dir, "artifacts": dir.join("artifacts") }));
+    c.ok(
+        "open",
+        json!({ "exe": "COUNT.EXE", "root": dir, "artifacts": dir.join("artifacts") }),
+    );
     let r = c.ok("run", json!({ "seconds": 0.5 }));
     assert_eq!(r["stop"], "TimeReached");
     let count = |c: &mut Client| {

@@ -11,7 +11,11 @@ use anyhow::Result;
 use clap::{Parser, Subcommand};
 
 #[derive(Parser)]
-#[command(name = "drydock", version, about = "Run, play and inspect original 32-bit Windows programs")]
+#[command(
+    name = "drydock",
+    version,
+    about = "Run, play and inspect original 32-bit Windows programs"
+)]
 struct Cli {
     #[command(subcommand)]
     cmd: Cmd,

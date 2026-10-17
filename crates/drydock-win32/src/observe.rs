@@ -51,7 +51,12 @@ impl Session {
                     crate::sched::ThreadState::Ready => "ready".into(),
                     crate::sched::ThreadState::Resume { .. } => "resuming".into(),
                     crate::sched::ThreadState::Blocked { api, block } => {
-                        format!("blocked in {} on {:?} until {:?}", self.thunks.name_of(*api), block.wait, block.deadline)
+                        format!(
+                            "blocked in {} on {:?} until {:?}",
+                            self.thunks.name_of(*api),
+                            block.wait,
+                            block.deadline
+                        )
                     }
                     crate::sched::ThreadState::Terminated => format!("exited ({:?})", t.exit_code),
                 },
@@ -110,20 +115,36 @@ impl Session {
         let extended = crate::input::vk_is_extended(vk);
         self.user.input.schedule(
             at,
-            crate::input::InputEvent::Key { vk, scan, extended, down: true },
+            crate::input::InputEvent::Key {
+                vk,
+                scan,
+                extended,
+                down: true,
+            },
         );
         self.user.input.schedule(
             at + hold_ns,
-            crate::input::InputEvent::Key { vk, scan, extended, down: false },
+            crate::input::InputEvent::Key {
+                vk,
+                scan,
+                extended,
+                down: false,
+            },
         );
     }
 
     pub fn key(&mut self, vk: u8, down: bool, at: u64) {
         let scan = crate::input::vk_to_scan(vk);
         let extended = crate::input::vk_is_extended(vk);
-        self.user
-            .input
-            .schedule(at, crate::input::InputEvent::Key { vk, scan, extended, down });
+        self.user.input.schedule(
+            at,
+            crate::input::InputEvent::Key {
+                vk,
+                scan,
+                extended,
+                down,
+            },
+        );
     }
 
     pub fn answer_dialog(&mut self, button: u32) -> bool {

@@ -19,16 +19,37 @@ pub enum InputEvent {
         down: bool,
     },
     /// Absolute pointer position in screen coordinates.
-    MouseMove { x: i32, y: i32 },
+    MouseMove {
+        x: i32,
+        y: i32,
+    },
     /// Relative motion (mickeys), e.g. from a captured host pointer.
-    MouseRel { dx: i32, dy: i32 },
-    MouseButton { button: u8, down: bool },
-    Wheel { delta: i32 },
+    MouseRel {
+        dx: i32,
+        dy: i32,
+    },
+    MouseButton {
+        button: u8,
+        down: bool,
+    },
+    Wheel {
+        delta: i32,
+    },
     /// Joystick axes in the range 0..=65535 (x, y, z, r).
-    JoyAxes { x: u16, y: u16, z: u16, r: u16 },
-    JoyButton { button: u8, down: bool },
+    JoyAxes {
+        x: u16,
+        y: u16,
+        z: u16,
+        r: u16,
+    },
+    JoyButton {
+        button: u8,
+        down: bool,
+    },
     /// The emulated window gained/lost host focus.
-    Focus { active: bool },
+    Focus {
+        active: bool,
+    },
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -82,7 +103,11 @@ impl Default for InputState {
 impl InputState {
     /// Schedule an event; events are kept sorted by time (stable for equal times).
     pub fn schedule(&mut self, at_ns: u64, ev: InputEvent) {
-        let idx = self.pending.iter().position(|e| e.at_ns > at_ns).unwrap_or(self.pending.len());
+        let idx = self
+            .pending
+            .iter()
+            .position(|e| e.at_ns > at_ns)
+            .unwrap_or(self.pending.len());
         self.pending.insert(idx, TimedInput { at_ns, ev });
     }
 
@@ -203,8 +228,8 @@ pub fn vk_to_scan(vk: u8) -> u16 {
         b'0' => 0x0b,
         b'1'..=b'9' => 0x02 + (vk - b'1') as u16,
         b'A'..=b'Z' => [
-            0x1e, 0x30, 0x2e, 0x20, 0x12, 0x21, 0x22, 0x23, 0x17, 0x24, 0x25, 0x26, 0x32, 0x31,
-            0x18, 0x19, 0x10, 0x13, 0x1f, 0x14, 0x16, 0x2f, 0x11, 0x2d, 0x15, 0x2c,
+            0x1e, 0x30, 0x2e, 0x20, 0x12, 0x21, 0x22, 0x23, 0x17, 0x24, 0x25, 0x26, 0x32, 0x31, 0x18, 0x19, 0x10, 0x13,
+            0x1f, 0x14, 0x16, 0x2f, 0x11, 0x2d, 0x15, 0x2c,
         ][(vk - b'A') as usize],
         0x60 => 0x52,
         0x61 => 0x4f,
@@ -268,17 +293,83 @@ pub fn vk_to_char(vk: u8, shift: bool, caps: bool) -> Option<u8> {
         0x08 => 0x08,
         0x09 => b'\t',
         0x1b => 0x1b,
-        0xba => if shift { b':' } else { b';' },
-        0xbb => if shift { b'+' } else { b'=' },
-        0xbc => if shift { b'<' } else { b',' },
-        0xbd => if shift { b'_' } else { b'-' },
-        0xbe => if shift { b'>' } else { b'.' },
-        0xbf => if shift { b'?' } else { b'/' },
-        0xc0 => if shift { b'~' } else { b'`' },
-        0xdb => if shift { b'{' } else { b'[' },
-        0xdc => if shift { b'|' } else { b'\\' },
-        0xdd => if shift { b'}' } else { b']' },
-        0xde => if shift { b'"' } else { b'\'' },
+        0xba => {
+            if shift {
+                b':'
+            } else {
+                b';'
+            }
+        }
+        0xbb => {
+            if shift {
+                b'+'
+            } else {
+                b'='
+            }
+        }
+        0xbc => {
+            if shift {
+                b'<'
+            } else {
+                b','
+            }
+        }
+        0xbd => {
+            if shift {
+                b'_'
+            } else {
+                b'-'
+            }
+        }
+        0xbe => {
+            if shift {
+                b'>'
+            } else {
+                b'.'
+            }
+        }
+        0xbf => {
+            if shift {
+                b'?'
+            } else {
+                b'/'
+            }
+        }
+        0xc0 => {
+            if shift {
+                b'~'
+            } else {
+                b'`'
+            }
+        }
+        0xdb => {
+            if shift {
+                b'{'
+            } else {
+                b'['
+            }
+        }
+        0xdc => {
+            if shift {
+                b'|'
+            } else {
+                b'\\'
+            }
+        }
+        0xdd => {
+            if shift {
+                b'}'
+            } else {
+                b']'
+            }
+        }
+        0xde => {
+            if shift {
+                b'"'
+            } else {
+                b'\''
+            }
+        }
         0x60..=0x69 => b'0' + (vk - 0x60),
         0x6a => b'*',
         0x6b => b'+',

@@ -205,11 +205,7 @@ impl Session {
             }
             match gfx::Gpu::new(&self.host.gpu_options) {
                 Ok(g) => {
-                    self.event(
-                        crate::diag::Severity::Info,
-                        "gpu",
-                        format!("adapter {:?}", g.report),
-                    );
+                    self.event(crate::diag::Severity::Info, "gpu", format!("adapter {:?}", g.report));
                     self.host.renderer = Some(gfx::Renderer::new(g));
                 }
                 Err(e) => {
@@ -258,7 +254,11 @@ fn sync_target(s: &mut Session, id: u32) -> Result<(), String> {
     let Some(sf) = s.display.surfaces.get(&id).cloned() else {
         return Ok(());
     };
-    let fmt = if sf.fmt.is_depth() { gfx::TexFormat::Depth } else { gfx::TexFormat::Color };
+    let fmt = if sf.fmt.is_depth() {
+        gfx::TexFormat::Depth
+    } else {
+        gfx::TexFormat::Color
+    };
     let r = s.renderer()?;
     let existed = r.has_texture(id);
     r.ensure_texture(id, sf.w, sf.h, 1, fmt);
@@ -344,7 +344,9 @@ pub fn readback(s: &mut Session, id: u32) {
             }
             row[x * bpp..x * bpp + bpp].copy_from_slice(&out[..bpp]);
         }
-        let _ = s.mem.write_force(sf.mem + y as u32 * sf.pitch, &row[..sf.w as usize * bpp]);
+        let _ = s
+            .mem
+            .write_force(sf.mem + y as u32 * sf.pitch, &row[..sf.w as usize * bpp]);
     }
     // The readback itself is not a guest write: contents now match the GPU copy.
     if let Some(p) = s.display.surfaces.get_mut(&id) {
@@ -382,7 +384,13 @@ pub fn depth_fill(s: &mut Session, id: u32, r: &Rect, depth: u32) {
         let scratch = 0x8000_0000 | id;
         if let Ok(rr) = s.renderer() {
             rr.ensure_texture(scratch, sf.w, sf.h, 1, gfx::TexFormat::Color);
-            rr.clear(scratch, Some(id), [r.left as u32, r.top as u32, r.w() as u32, r.h() as u32], None, Some(z));
+            rr.clear(
+                scratch,
+                Some(id),
+                [r.left as u32, r.top as u32, r.w() as u32, r.h() as u32],
+                None,
+                Some(z),
+            );
         }
         if let Some(p) = s.display.surfaces.get_mut(&id) {
             p.gpu_dirty = true;
@@ -396,7 +404,14 @@ pub fn depth_fill(s: &mut Session, id: u32, r: &Rect, depth: u32) {
 }
 
 /// GPU path for blits onto GPU-owned surfaces (avoids read-back/upload round trips).
-pub fn gpu_blit(s: &mut Session, dst: u32, dr: Rect, src: u32, sr: Rect, key: Option<crate::surface::ColorKey>) -> bool {
+pub fn gpu_blit(
+    s: &mut Session,
+    dst: u32,
+    dr: Rect,
+    src: u32,
+    sr: Rect,
+    key: Option<crate::surface::ColorKey>,
+) -> bool {
     let dst_gpu = s.display.surfaces.get(&dst).map(|x| x.gpu_dirty).unwrap_or(false);
     if !dst_gpu {
         return false;
@@ -445,8 +460,18 @@ pub fn gpu_blit(s: &mut Session, dst: u32, dr: Rect, src: u32, sr: Rect, key: Op
     let verts = [
         v(dr.left as f32, dr.top as f32, sr.left as f32 / sw, sr.top as f32 / sh),
         v(dr.right as f32, dr.top as f32, sr.right as f32 / sw, sr.top as f32 / sh),
-        v(dr.left as f32, dr.bottom as f32, sr.left as f32 / sw, sr.bottom as f32 / sh),
-        v(dr.right as f32, dr.bottom as f32, sr.right as f32 / sw, sr.bottom as f32 / sh),
+        v(
+            dr.left as f32,
+            dr.bottom as f32,
+            sr.left as f32 / sw,
+            sr.bottom as f32 / sh,
+        ),
+        v(
+            dr.right as f32,
+            dr.bottom as f32,
+            sr.right as f32 / sw,
+            sr.bottom as f32 / sh,
+        ),
     ];
     let pipe = gfx::PipeKey {
         topology: gfx::Topology::Triangles,
@@ -455,8 +480,21 @@ pub fn gpu_blit(s: &mut Session, dst: u32, dr: Rect, src: u32, sr: Rect, key: Op
         cull: 1,
         color_write: true,
     };
-    let samp = gfx::SamplerKey { mag: 1, min: 1, mip: 1, addr_u: 3, addr_v: 3 };
-    let vp = gfx::Viewport { x: 0.0, y: 0.0, w: tw, h: th, min_z: 0.0, max_z: 1.0 };
+    let samp = gfx::SamplerKey {
+        mag: 1,
+        min: 1,
+        mip: 1,
+        addr_u: 3,
+        addr_v: 3,
+    };
+    let vp = gfx::Viewport {
+        x: 0.0,
+        y: 0.0,
+        w: tw,
+        h: th,
+        min_z: 0.0,
+        max_z: 1.0,
+    };
     let Ok(r) = s.renderer() else {
         return false;
     };
@@ -465,7 +503,18 @@ pub fn gpu_blit(s: &mut Session, dst: u32, dr: Rect, src: u32, sr: Rect, key: Op
     if c.is_empty() {
         return true;
     }
-    r.draw(dst, None, pipe, &u, &verts, &[0, 1, 2, 2, 1, 3], [Some(src), None], [samp, samp], vp, [c.left as u32, c.top as u32, c.w() as u32, c.h() as u32]);
+    r.draw(
+        dst,
+        None,
+        pipe,
+        &u,
+        &verts,
+        &[0, 1, 2, 2, 1, 3],
+        [Some(src), None],
+        [samp, samp],
+        vp,
+        [c.left as u32, c.top as u32, c.w() as u32, c.h() as u32],
+    );
     if let Some(p) = s.display.surfaces.get_mut(&dst) {
         p.version += 1;
     }
@@ -500,7 +549,11 @@ fn device_desc(tnl: bool, hal: bool) -> Vec<u8> {
     for base in [4usize, 60] {
         p(&mut b, base, 56);
         p(&mut b, base + 4, 0x2 | 0x10 | 0x20 | 0x40); // misc caps
-        p(&mut b, base + 8, 0x1 | 0x10 | 0x20 | 0x80 | 0x100 | 0x4000 | 0x10000 | 0x100000 | 0x200000);
+        p(
+            &mut b,
+            base + 8,
+            0x1 | 0x10 | 0x20 | 0x80 | 0x100 | 0x4000 | 0x10000 | 0x100000 | 0x200000,
+        );
         p(&mut b, base + 12, 0xff);
         p(&mut b, base + 16, 0x1fff);
         p(&mut b, base + 20, 0x1fff);
@@ -551,9 +604,24 @@ fn cstr(t: &str) -> CallArg {
 fn d3d_enum_devices(s: &mut Session) -> ApiResult {
     let [_this, cb, ctx] = s.args::<3>()?;
     let items = vec![
-        vec![cstr("Microsoft Direct3D RGB Software Emulation"), cstr("RGB Emulation"), CallArg::Buf(device_desc(false, false)), CallArg::Val(ctx)],
-        vec![cstr("Microsoft Direct3D Hardware acceleration through Direct3D HAL"), cstr("Direct3D HAL"), CallArg::Buf(device_desc(false, true)), CallArg::Val(ctx)],
-        vec![cstr("Microsoft Direct3D Hardware Transform and Lighting acceleration capable device"), cstr("Direct3D T&L HAL"), CallArg::Buf(device_desc(true, true)), CallArg::Val(ctx)],
+        vec![
+            cstr("Microsoft Direct3D RGB Software Emulation"),
+            cstr("RGB Emulation"),
+            CallArg::Buf(device_desc(false, false)),
+            CallArg::Val(ctx),
+        ],
+        vec![
+            cstr("Microsoft Direct3D Hardware acceleration through Direct3D HAL"),
+            cstr("Direct3D HAL"),
+            CallArg::Buf(device_desc(false, true)),
+            CallArg::Val(ctx),
+        ],
+        vec![
+            cstr("Microsoft Direct3D Hardware Transform and Lighting acceleration capable device"),
+            cstr("Direct3D T&L HAL"),
+            CallArg::Buf(device_desc(true, true)),
+            CallArg::Val(ctx),
+        ],
     ];
     enum_callbacks(cb, items, 0, D3D_OK)
 }
@@ -593,7 +661,11 @@ fn d3d_create_device(s: &mut Session) -> ApiResult {
         return Ok(ApiRet::Ret(d3derr(694))); // DDERR_D3DNOTINITIALIZED-like failure
     }
     if let Err(e) = s.renderer() {
-        s.event(crate::diag::Severity::Error, "CreateDevice", format!("no GPU renderer: {e}"));
+        s.event(
+            crate::diag::Severity::Error,
+            "CreateDevice",
+            format!("no GPU renderer: {e}"),
+        );
         return Ok(ApiRet::Ret(E_OUTOFMEMORY));
     }
     let zbuf = depth_of(s, target).is_some();
@@ -614,7 +686,14 @@ fn d3d_create_device(s: &mut Session) -> ApiResult {
         tss: default_tss(),
         textures: [0; 8],
         transforms,
-        viewport: Viewport7 { x: 0, y: 0, w, h, min_z: 0.0, max_z: 1.0 },
+        viewport: Viewport7 {
+            x: 0,
+            y: 0,
+            w,
+            h,
+            min_z: 0.0,
+            max_z: 1.0,
+        },
         material: Material7::default(),
         lights: BTreeMap::new(),
         light_enable: BTreeMap::new(),
@@ -673,7 +752,14 @@ fn d3d_create_vertex_buffer(s: &mut Session) -> ApiResult {
         .heaps
         .alloc(&mut s.mem, s.heaps.process_heap, size, true)
         .ok_or(ApiError::Fatal("vertex buffer allocation".into()))?;
-    let id = s.com_new(ComKind::VertexBuffer(VertexBuffer { mem, size, fvf, count, caps, locks: 0 }));
+    let id = s.com_new(ComKind::VertexBuffer(VertexBuffer {
+        mem,
+        size,
+        fvf,
+        count,
+        caps,
+        locks: 0,
+    }));
     s.out_iface(pp, id, &IDIRECT3DVERTEXBUFFER7)?;
     Ok(ApiRet::Ret(D3D_OK))
 }
@@ -826,7 +912,11 @@ fn read_vertices(s: &Session, st: &Streams, fvf: u32, first: u32, count: u32) ->
             let n = st.normal.0 + i * st.normal.1;
             v.normal = [f(n), f(n + 4), f(n + 8)];
         }
-        v.diffuse = if st.diffuse.0 != 0 { color_rgba(u(st.diffuse.0 + i * st.diffuse.1)) } else { [255; 4] };
+        v.diffuse = if st.diffuse.0 != 0 {
+            color_rgba(u(st.diffuse.0 + i * st.diffuse.1))
+        } else {
+            [255; 4]
+        };
         if st.specular.0 != 0 {
             v.specular = color_rgba(u(st.specular.0 + i * st.specular.1));
         }
@@ -843,7 +933,13 @@ fn read_vertices(s: &Session, st: &Streams, fvf: u32, first: u32, count: u32) ->
     Ok(out)
 }
 
-fn read_vertices_checked(s: &Session, st: &Streams, rhw: bool, first: u32, count: u32) -> Result<Vec<gfx::Vertex>, ApiError> {
+fn read_vertices_checked(
+    s: &Session,
+    st: &Streams,
+    rhw: bool,
+    first: u32,
+    count: u32,
+) -> Result<Vec<gfx::Vertex>, ApiError> {
     let mut out = Vec::with_capacity(count as usize);
     let f = |a: u32| -> Result<f32, ApiError> { Ok(s.mem.read_f32(a)?) };
     for i in first..first + count {
@@ -854,7 +950,11 @@ fn read_vertices_checked(s: &Session, st: &Streams, rhw: bool, first: u32, count
             let n = st.normal.0 + i * st.normal.1;
             v.normal = [f(n)?, f(n + 4)?, f(n + 8)?];
         }
-        v.diffuse = if st.diffuse.0 != 0 { color_rgba(s.mem.read_u32(st.diffuse.0 + i * st.diffuse.1)?) } else { [255; 4] };
+        v.diffuse = if st.diffuse.0 != 0 {
+            color_rgba(s.mem.read_u32(st.diffuse.0 + i * st.diffuse.1)?)
+        } else {
+            [255; 4]
+        };
         if st.specular.0 != 0 {
             v.specular = color_rgba(s.mem.read_u32(st.specular.0 + i * st.specular.1)?);
         }
@@ -990,7 +1090,8 @@ fn mat_mul(a: &[f32; 16], b: &[f32; 16]) -> [f32; 16] {
 /// Inverse-transpose of the upper 3x3 (row-vector convention), as a 4x4.
 fn normal_matrix(m: &[f32; 16]) -> [f32; 16] {
     let a = [m[0], m[1], m[2], m[4], m[5], m[6], m[8], m[9], m[10]];
-    let det = a[0] * (a[4] * a[8] - a[5] * a[7]) - a[1] * (a[3] * a[8] - a[5] * a[6]) + a[2] * (a[3] * a[7] - a[4] * a[6]);
+    let det =
+        a[0] * (a[4] * a[8] - a[5] * a[7]) - a[1] * (a[3] * a[8] - a[5] * a[6]) + a[2] * (a[3] * a[7] - a[4] * a[6]);
     if det.abs() < 1e-20 {
         return IDENTITY;
     }
@@ -1178,7 +1279,12 @@ fn build_uniforms(s: &Session, d: &Device, pretransformed: bool, fvf: u32, tw: f
             ambient: l.ambient,
             position: [pos[0], pos[1], pos[2], 1.0],
             direction: [dir[0], dir[1], dir[2], 0.0],
-            params: [if l.range <= 0.0 { f32::MAX } else { l.range }, l.falloff, l.att[0], l.att[1]],
+            params: [
+                if l.range <= 0.0 { f32::MAX } else { l.range },
+                l.falloff,
+                l.att[0],
+                l.att[1],
+            ],
             params2: [l.att[2], (l.theta / 2.0).cos(), (l.phi / 2.0).cos(), 0.0],
         };
         li += 1;
@@ -1235,7 +1341,13 @@ fn pipe_for(d: &Device, topology: gfx::Topology, has_depth: bool) -> gfx::PipeKe
 }
 
 /// Issue a draw with vertices already decoded.
-fn submit_draw(s: &mut Session, prim: u32, fvf: u32, verts: Vec<gfx::Vertex>, indices: Option<Vec<u32>>) -> Result<u32, ApiError> {
+fn submit_draw(
+    s: &mut Session,
+    prim: u32,
+    fvf: u32,
+    verts: Vec<gfx::Vertex>,
+    indices: Option<Vec<u32>>,
+) -> Result<u32, ApiError> {
     let (dtarget, dtextures) = {
         let d = dev_ref(s)?;
         (d.target, [d.textures[0], d.textures[1]])
@@ -1258,8 +1370,16 @@ fn submit_draw(s: &mut Session, prim: u32, fvf: u32, verts: Vec<gfx::Vertex>, in
     if let Some(z) = depth {
         sync_target(s, z).map_err(ApiError::Fatal)?;
     }
-    let tex0 = if dtextures[0] != 0 { sync_texture(s, dtextures[0]) } else { None };
-    let tex1 = if dtextures[1] != 0 { sync_texture(s, dtextures[1]) } else { None };
+    let tex0 = if dtextures[0] != 0 {
+        sync_texture(s, dtextures[0])
+    } else {
+        None
+    };
+    let tex1 = if dtextures[1] != 0 {
+        sync_texture(s, dtextures[1])
+    } else {
+        None
+    };
     let (tw, th) = {
         let p = &s.display.surfaces[&target];
         (p.w as f32, p.h as f32)
@@ -1271,7 +1391,14 @@ fn submit_draw(s: &mut Session, prim: u32, fvf: u32, verts: Vec<gfx::Vertex>, in
     // Transformed vertices carry absolute screen coordinates and depth; the
     // viewport only bounds them (through the scissor below).
     let vp = if pre {
-        gfx::Viewport { x: 0.0, y: 0.0, w: tw, h: th, min_z: 0.0, max_z: 1.0 }
+        gfx::Viewport {
+            x: 0.0,
+            y: 0.0,
+            w: tw,
+            h: th,
+            min_z: 0.0,
+            max_z: 1.0,
+        }
     } else {
         gfx::Viewport {
             x: d.viewport.x as f32,
@@ -1285,7 +1412,18 @@ fn submit_draw(s: &mut Session, prim: u32, fvf: u32, verts: Vec<gfx::Vertex>, in
     let scissor = [d.viewport.x, d.viewport.y, d.viewport.w, d.viewport.h];
     let samplers = [sampler_for(d, 0), sampler_for(d, 1)];
     let r = s.renderer().map_err(ApiError::Fatal)?;
-    r.draw(target, depth, pipe, &u, &verts, &idx, [tex0, tex1], samplers, vp, scissor);
+    r.draw(
+        target,
+        depth,
+        pipe,
+        &u,
+        &verts,
+        &idx,
+        [tex0, tex1],
+        samplers,
+        vp,
+        scissor,
+    );
     for id in [Some(target), depth].into_iter().flatten() {
         if let Some(p) = s.display.surfaces.get_mut(&id) {
             p.gpu_dirty = true;
@@ -1367,7 +1505,16 @@ fn dev_set_render_target(s: &mut Session) -> ApiResult {
     s.com_release(old);
     let sid = s.surface_of_obj(t).unwrap();
     let (w, h) = (s.display.surfaces[&sid].w, s.display.surfaces[&sid].h);
-    with_dev(s, |d| d.viewport = Viewport7 { x: 0, y: 0, w, h, min_z: 0.0, max_z: 1.0 })?;
+    with_dev(s, |d| {
+        d.viewport = Viewport7 {
+            x: 0,
+            y: 0,
+            w,
+            h,
+            min_z: 0.0,
+            max_z: 1.0,
+        }
+    })?;
     Ok(ApiRet::Ret(D3D_OK))
 }
 
@@ -1503,7 +1650,12 @@ fn dev_get_viewport(s: &mut Session) -> ApiResult {
 }
 
 fn read_color4(s: &Session, p: u32) -> Result<[f32; 4], ApiError> {
-    Ok([s.mem.read_f32(p)?, s.mem.read_f32(p + 4)?, s.mem.read_f32(p + 8)?, s.mem.read_f32(p + 12)?])
+    Ok([
+        s.mem.read_f32(p)?,
+        s.mem.read_f32(p + 4)?,
+        s.mem.read_f32(p + 8)?,
+        s.mem.read_f32(p + 12)?,
+    ])
 }
 
 fn dev_set_material(s: &mut Session) -> ApiResult {
@@ -1577,7 +1729,19 @@ fn dev_get_light(s: &mut Session) -> ApiResult {
         }
     }
     let rest = [
-        l.position[0], l.position[1], l.position[2], l.direction[0], l.direction[1], l.direction[2], l.range, l.falloff, l.att[0], l.att[1], l.att[2], l.theta, l.phi,
+        l.position[0],
+        l.position[1],
+        l.position[2],
+        l.direction[0],
+        l.direction[1],
+        l.direction[2],
+        l.range,
+        l.falloff,
+        l.att[0],
+        l.att[1],
+        l.att[2],
+        l.theta,
+        l.phi,
     ];
     for (i, v) in rest.iter().enumerate() {
         s.mem.write_f32(p + 52 + 4 * i as u32, *v)?;
@@ -1624,7 +1788,10 @@ fn dev_set_render_state(s: &mut Session) -> ApiResult {
     }
     let st = st as usize;
     if matches!(st, 8) && v != 3 {
-        s.missing("SetRenderState", format!("FILLMODE {v} (only solid fill is implemented)"));
+        s.missing(
+            "SetRenderState",
+            format!("FILLMODE {v} (only solid fill is implemented)"),
+        );
     }
     if (52..=59).contains(&st) && st == 52 && v != 0 {
         s.missing("SetRenderState", "stencil buffering".into());
@@ -1663,7 +1830,10 @@ fn dev_set_texture(s: &mut Session) -> ApiResult {
         }
     };
     if stage >= 2 && new != 0 {
-        s.missing("SetTexture", format!("texture stage {stage} (2 stages are implemented)"));
+        s.missing(
+            "SetTexture",
+            format!("texture stage {stage} (2 stages are implemented)"),
+        );
     }
     let recorded = with_dev(s, |d| {
         record(d, |b| {
@@ -1704,7 +1874,10 @@ fn dev_set_texture_stage_state(s: &mut Session) -> ApiResult {
         return Ok(ApiRet::Ret(D3DERR_INVALIDCALL));
     }
     if stage < 2 && ty == 11 && (v >> 16) > 3 {
-        s.missing("SetTextureStageState", format!("texture coordinate generation {:#x}", v >> 16));
+        s.missing(
+            "SetTextureStageState",
+            format!("texture coordinate generation {:#x}", v >> 16),
+        );
     }
     if stage >= 2 && ty == 1 && v != 1 {
         s.missing("SetTextureStageState", format!("stage {stage} colour op {v}"));
@@ -1760,7 +1933,10 @@ fn dev_draw_primitive(s: &mut Session) -> ApiResult {
 
 fn read_indices16(s: &Session, p: u32, n: u32) -> Result<Vec<u32>, ApiError> {
     let raw = s.mem.read_vec(p, n * 2)?;
-    Ok(raw.chunks_exact(2).map(|c| u16::from_le_bytes([c[0], c[1]]) as u32).collect())
+    Ok(raw
+        .chunks_exact(2)
+        .map(|c| u16::from_le_bytes([c[0], c[1]]) as u32)
+        .collect())
 }
 
 fn dev_draw_indexed_primitive(s: &mut Session) -> ApiResult {
@@ -2015,7 +2191,11 @@ fn dev_load(s: &mut Session) -> ApiResult {
     };
     let dchain = super::ddraw::mip_chain(s, dobj);
     let schain = super::ddraw::mip_chain(s, sobj);
-    let (px, py) = if ppoint != 0 { (s.mem.read_i32(ppoint)?, s.mem.read_i32(ppoint + 4)?) } else { (0, 0) };
+    let (px, py) = if ppoint != 0 {
+        (s.mem.read_i32(ppoint)?, s.mem.read_i32(ppoint + 4)?)
+    } else {
+        (0, 0)
+    };
     let srect = if prect != 0 { Some(s.read_rect(prect)?) } else { None };
     // Source levels are matched to destination levels of the same size.
     for (k, d) in dchain.iter().enumerate() {
@@ -2038,7 +2218,12 @@ fn dev_load(s: &mut Session) -> ApiResult {
         }
         let scale = 1i32 << k;
         let sr = match srect {
-            Some(r) => Rect::new(r.left / scale, r.top / scale, (r.right / scale).max(r.left / scale + 1), (r.bottom / scale).max(r.top / scale + 1)),
+            Some(r) => Rect::new(
+                r.left / scale,
+                r.top / scale,
+                (r.right / scale).max(r.left / scale + 1),
+                (r.bottom / scale).max(r.top / scale + 1),
+            ),
             None => Rect::new(0, 0, dw as i32, dh as i32),
         };
         let dr = Rect::new(px / scale, py / scale, px / scale + sr.w(), py / scale + sr.h());
@@ -2068,7 +2253,11 @@ fn dev_compute_sphere_visibility(s: &mut Session) -> ApiResult {
     let proj = d.transforms.get(&3).copied().unwrap_or(IDENTITY);
     let m = mat_mul(&mat_mul(&world, &view), &proj);
     for i in 0..n {
-        let c = [s.mem.read_f32(centers + 12 * i)?, s.mem.read_f32(centers + 12 * i + 4)?, s.mem.read_f32(centers + 12 * i + 8)?];
+        let c = [
+            s.mem.read_f32(centers + 12 * i)?,
+            s.mem.read_f32(centers + 12 * i + 4)?,
+            s.mem.read_f32(centers + 12 * i + 8)?,
+        ];
         let r = s.mem.read_f32(radii + 4 * i)?;
         // Clip-space test of the sphere against the six frustum planes.
         let col = |j: usize| [m[j], m[4 + j], m[8 + j], m[12 + j]];

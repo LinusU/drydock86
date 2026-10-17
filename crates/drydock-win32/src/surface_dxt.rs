@@ -6,7 +6,11 @@ fn rgb565(c: u16) -> [u8; 3] {
     let r = ((c >> 11) & 31) as u32;
     let g = ((c >> 5) & 63) as u32;
     let b = (c & 31) as u32;
-    [((r << 3) | (r >> 2)) as u8, ((g << 2) | (g >> 4)) as u8, ((b << 3) | (b >> 2)) as u8]
+    [
+        ((r << 3) | (r >> 2)) as u8,
+        ((g << 2) | (g >> 4)) as u8,
+        ((b << 3) | (b >> 2)) as u8,
+    ]
 }
 
 fn color_block(b: &[u8], out: &mut [[u8; 4]; 16], dxt1: bool) {

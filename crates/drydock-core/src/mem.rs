@@ -45,9 +45,7 @@ pub fn decode_protect(protect: u32) -> Access {
     let (read, write) = match p {
         PAGE_NOACCESS => (false, false),
         PAGE_READONLY | PAGE_EXECUTE | PAGE_EXECUTE_READ => (true, false),
-        PAGE_READWRITE | PAGE_WRITECOPY | PAGE_EXECUTE_READWRITE | PAGE_EXECUTE_WRITECOPY => {
-            (true, true)
-        }
+        PAGE_READWRITE | PAGE_WRITECOPY | PAGE_EXECUTE_READWRITE | PAGE_EXECUTE_WRITECOPY => (true, true),
         _ => (false, false),
     };
     Access {
@@ -276,12 +274,7 @@ impl AddressSpace {
                 size: r.size,
                 kind: r.kind,
                 tag: r.tag.clone(),
-                committed_bytes: r
-                    .pages
-                    .iter()
-                    .filter(|p| p.state == PageState::Committed)
-                    .count() as u32
-                    * PAGE_SIZE,
+                committed_bytes: r.pages.iter().filter(|p| p.state == PageState::Committed).count() as u32 * PAGE_SIZE,
             })
             .collect()
     }
@@ -385,14 +378,7 @@ impl AddressSpace {
     }
 
     /// Reserve and commit in one step.
-    pub fn alloc(
-        &mut self,
-        base: Option<u32>,
-        size: u32,
-        kind: RegionKind,
-        protect: u32,
-        tag: &str,
-    ) -> MemResult<u32> {
+    pub fn alloc(&mut self, base: Option<u32>, size: u32, kind: RegionKind, protect: u32, tag: &str) -> MemResult<u32> {
         let b = self.reserve(base, size, kind, protect, tag)?;
         self.commit(b, size, protect)?;
         Ok(b)
@@ -402,9 +388,7 @@ impl AddressSpace {
     pub fn commit(&mut self, addr: u32, size: u32, protect: u32) -> MemResult<()> {
         let start = addr & !(PAGE_SIZE - 1);
         let end = round_up(addr as u64 + size.max(1) as u64, PAGE_SIZE as u64);
-        let r = self
-            .region_at_mut(start)
-            .ok_or(MemError::Unmapped { addr: start })?;
+        let r = self.region_at_mut(start).ok_or(MemError::Unmapped { addr: start })?;
         if end > r.end() {
             return Err(MemError::Invalid("commit range crosses region end"));
         }
@@ -426,9 +410,7 @@ impl AddressSpace {
     /// Decommit pages. Contents are discarded (zeroed).
     pub fn decommit(&mut self, addr: u32, size: u32) -> MemResult<()> {
         let start = addr & !(PAGE_SIZE - 1);
-        let r = self
-            .region_at_mut(start)
-            .ok_or(MemError::Unmapped { addr: start })?;
+        let r = self.region_at_mut(start).ok_or(MemError::Unmapped { addr: start })?;
         let end = if size == 0 {
             r.end()
         } else {
@@ -460,18 +442,13 @@ impl AddressSpace {
     pub fn protect(&mut self, addr: u32, size: u32, protect: u32) -> MemResult<u32> {
         let start = addr & !(PAGE_SIZE - 1);
         let end = round_up(addr as u64 + size.max(1) as u64, PAGE_SIZE as u64);
-        let r = self
-            .region_at_mut(start)
-            .ok_or(MemError::Unmapped { addr: start })?;
+        let r = self.region_at_mut(start).ok_or(MemError::Unmapped { addr: start })?;
         if end > r.end() {
             return Err(MemError::Invalid("protect range crosses region end"));
         }
         let first = ((start - r.base) / PAGE_SIZE) as usize;
         let last = ((end - r.base as u64) / PAGE_SIZE as u64) as usize;
-        if r.pages[first..last]
-            .iter()
-            .any(|p| p.state != PageState::Committed)
-        {
+        if r.pages[first..last].iter().any(|p| p.state != PageState::Committed) {
             return Err(MemError::NotCommitted { addr: start });
         }
         let old = r.pages[first].protect;
@@ -489,10 +466,7 @@ impl AddressSpace {
 
     /// Release an entire region.
     pub fn release(&mut self, base: u32) -> MemResult<()> {
-        let r = self
-            .regions
-            .remove(&base)
-            .ok_or(MemError::Unmapped { addr: base })?;
+        let r = self.regions.remove(&base).ok_or(MemError::Unmapped { addr: base })?;
         self.pending_map.push(MapOp::Unmap {
             base: r.base,
             size: r.size,
@@ -758,8 +732,7 @@ impl AddressSpace {
             // Iterate over runs of committed readable pages.
             let mut i = 0;
             while i < r.pages.len() {
-                if r.pages[i].state != PageState::Committed || !decode_protect(r.pages[i].protect).read
-                {
+                if r.pages[i].state != PageState::Committed || !decode_protect(r.pages[i].protect).read {
                     i += 1;
                     continue;
                 }
@@ -801,7 +774,10 @@ impl AddressSpace {
                     if page.iter().all(|&b| b == 0) {
                         continue;
                     }
-                    chunks.push(PageData { index: i as u32, bytes: page.to_vec() });
+                    chunks.push(PageData {
+                        index: i as u32,
+                        bytes: page.to_vec(),
+                    });
                 }
                 RegionSnapshot {
                     base: r.base,
@@ -916,25 +892,22 @@ mod tests {
         let a = m
             .alloc(Some(0x10000), 0x20000, RegionKind::Private, PAGE_READWRITE, "a")
             .unwrap();
-        let b = m
-            .alloc(None, 0x1000, RegionKind::Private, PAGE_READWRITE, "b")
-            .unwrap();
+        let b = m.alloc(None, 0x1000, RegionKind::Private, PAGE_READWRITE, "b").unwrap();
         assert_eq!(a, 0x10000);
         assert_eq!(b, 0x30000);
-        assert!(m.alloc(Some(0x20000), 0x1000, RegionKind::Private, PAGE_READWRITE, "c").is_err());
+        assert!(
+            m.alloc(Some(0x20000), 0x1000, RegionKind::Private, PAGE_READWRITE, "c")
+                .is_err()
+        );
         m.release(a).unwrap();
-        let c = m
-            .alloc(None, 0x1000, RegionKind::Private, PAGE_READWRITE, "c")
-            .unwrap();
+        let c = m.alloc(None, 0x1000, RegionKind::Private, PAGE_READWRITE, "c").unwrap();
         assert_eq!(c, 0x10000);
     }
 
     #[test]
     fn snapshot_roundtrip() {
         let mut m = AddressSpace::new();
-        let a = m
-            .alloc(None, 0x2000, RegionKind::Private, PAGE_READWRITE, "a")
-            .unwrap();
+        let a = m.alloc(None, 0x2000, RegionKind::Private, PAGE_READWRITE, "a").unwrap();
         m.write_u32(a + 0x1004, 42).unwrap();
         let snap = m.snapshot();
         let mut n = AddressSpace::new();
@@ -946,9 +919,7 @@ mod tests {
     #[test]
     fn search_finds_bytes() {
         let mut m = AddressSpace::new();
-        let a = m
-            .alloc(None, 0x2000, RegionKind::Private, PAGE_READWRITE, "a")
-            .unwrap();
+        let a = m.alloc(None, 0x2000, RegionKind::Private, PAGE_READWRITE, "a").unwrap();
         m.write(a + 0xffe, b"needle").unwrap();
         assert_eq!(m.search(b"needle", 0, u32::MAX, 10), vec![a + 0xffe]);
     }

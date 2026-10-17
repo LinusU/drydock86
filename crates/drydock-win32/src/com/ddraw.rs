@@ -261,7 +261,12 @@ fn direct_draw_enumerate_ex_a(s: &mut Session) -> ApiResult {
 
 fn direct_draw_enumerate_a(s: &mut Session) -> ApiResult {
     let [cb, ctx] = s.args::<2>()?;
-    let items = vec![vec![CallArg::Val(0), cstr_buf(DRIVER_DESC), cstr_buf(DRIVER_NAME), CallArg::Val(ctx)]];
+    let items = vec![vec![
+        CallArg::Val(0),
+        cstr_buf(DRIVER_DESC),
+        cstr_buf(DRIVER_NAME),
+        CallArg::Val(ctx),
+    ]];
     enum_callbacks(cb, items, 0, DD_OK)
 }
 
@@ -316,7 +321,11 @@ fn dd_set_display_mode(s: &mut Session) -> ApiResult {
         width: w,
         height: h,
         bpp,
-        refresh: if refresh == 0 { s.config.windows.refresh_hz } else { refresh },
+        refresh: if refresh == 0 {
+            s.config.windows.refresh_hz
+        } else {
+            refresh
+        },
     };
     if let Some(ComKind::DirectDraw(d)) = s.com_obj_mut(id).map(|o| &mut o.kind) {
         d.mode_set = true;
@@ -397,7 +406,18 @@ fn dd_get_display_mode(s: &mut Session) -> ApiResult {
 }
 
 #[allow(clippy::too_many_arguments)]
-fn build_ddsd(size: u32, flags: u32, w: u32, h: u32, pitch: u32, fmt: Fmt, caps: u32, caps2: u32, mem: u32, extra24: u32) -> Vec<u8> {
+fn build_ddsd(
+    size: u32,
+    flags: u32,
+    w: u32,
+    h: u32,
+    pitch: u32,
+    fmt: Fmt,
+    caps: u32,
+    caps2: u32,
+    mem: u32,
+    extra24: u32,
+) -> Vec<u8> {
     let n = if size == 108 { 108 } else { 124 };
     let mut b = vec![0u8; n];
     let p = |b: &mut Vec<u8>, o: usize, v: u32| b[o..o + 4].copy_from_slice(&v.to_le_bytes());
@@ -476,14 +496,27 @@ fn write_ddcaps(s: &mut Session, p: u32, hel: bool) -> Result<(), ApiError> {
     put(&mut b, 0, size);
     // DDCAPS_3D | BLT | BLTCOLORFILL | BLTSTRETCH | COLORKEY | PALETTE | CANBLTSYSMEM |
     // BLTDEPTHFILL | CANCLIP | CANCLIPSTRETCHED
-    let caps = 0x1 | 0x40 | 0x0400_0000 | 0x200 | 0x40_0000 | 0x8000_0000 | 0x1000_0000 | 0x200_0000 | 0x2000_0000 | 0x4000_0000;
+    let caps = 0x1
+        | 0x40
+        | 0x0400_0000
+        | 0x200
+        | 0x40_0000
+        | 0x8000_0000
+        | 0x1000_0000
+        | 0x200_0000
+        | 0x2000_0000
+        | 0x4000_0000;
     put(&mut b, 4, caps);
     // DDCAPS2: CANRENDERWINDOWED | NOPAGELOCKREQUIRED | FLIPNOVSYNC | WIDESURFACES | PRIMARYGAMMA
     put(&mut b, 8, 0x80000 | 0x4000_0000 | 0x800_0000 | 0x1000 | 0x20000);
     // dwCKeyCaps: SRCBLT | DESTBLT
     put(&mut b, 12, 0x200 | 0x2);
     // dwFXCaps: BLTSTRETCHX/Y, BLTSHRINKX/Y, BLTMIRRORLEFTRIGHT/UPDOWN
-    put(&mut b, 16, 0x0000_0040 | 0x0000_0020 | 0x0000_0200 | 0x0000_0100 | 0x0000_0002 | 0x0000_0004);
+    put(
+        &mut b,
+        16,
+        0x0000_0040 | 0x0000_0020 | 0x0000_0200 | 0x0000_0100 | 0x0000_0002 | 0x0000_0004,
+    );
     // dwPalCaps: 8BIT | PRIMARYSURFACE
     put(&mut b, 24, 0x4 | 0x10);
     if !hel {
@@ -491,9 +524,20 @@ fn write_ddcaps(s: &mut Session, p: u32, hel: bool) -> Result<(), ApiError> {
         put(&mut b, 64, s.vram_free().max(1));
     }
     // ddsCaps (DDSCAPS at offset 104 in the DX6/7 layout's legacy field).
-    let scaps = DDSCAPS_BACKBUFFER | DDSCAPS_COMPLEX | DDSCAPS_FLIP | DDSCAPS_FRONTBUFFER | DDSCAPS_OFFSCREENPLAIN
-        | DDSCAPS_PALETTE | DDSCAPS_PRIMARYSURFACE | DDSCAPS_SYSTEMMEMORY | DDSCAPS_TEXTURE | DDSCAPS_3DDEVICE
-        | DDSCAPS_VIDEOMEMORY | DDSCAPS_ZBUFFER | DDSCAPS_MIPMAP | DDSCAPS_LOCALVIDMEM;
+    let scaps = DDSCAPS_BACKBUFFER
+        | DDSCAPS_COMPLEX
+        | DDSCAPS_FLIP
+        | DDSCAPS_FRONTBUFFER
+        | DDSCAPS_OFFSCREENPLAIN
+        | DDSCAPS_PALETTE
+        | DDSCAPS_PRIMARYSURFACE
+        | DDSCAPS_SYSTEMMEMORY
+        | DDSCAPS_TEXTURE
+        | DDSCAPS_3DDEVICE
+        | DDSCAPS_VIDEOMEMORY
+        | DDSCAPS_ZBUFFER
+        | DDSCAPS_MIPMAP
+        | DDSCAPS_LOCALVIDMEM;
     put(&mut b, 132, scaps);
     if size >= 380 {
         // DDSCAPS2 ddsCaps at the end of the DX7 structure.
@@ -546,9 +590,7 @@ fn dd_enum_surfaces(s: &mut Session) -> ApiResult {
             ComKind::Surface(sf) if sf.ddraw == dd => Some((*id, sf.clone())),
             _ => None,
         })
-        .filter(|(_, sf)| {
-            all || filter.as_ref().is_none_or(|f| surface_matches(s, sf, f) != nomatch)
-        })
+        .filter(|(_, sf)| all || filter.as_ref().is_none_or(|f| surface_matches(s, sf, f) != nomatch))
         .map(|(id, _)| id)
         .collect();
     let mut items = Vec::new();
@@ -558,7 +600,18 @@ fn dd_enum_surfaces(s: &mut Session) -> ApiResult {
         let p = s.iface(id, &IDIRECTDRAWSURFACE7)?;
         // The callback receives a reference it must release.
         s.com_addref(id);
-        let d = build_ddsd(124, DDSD_CAPS | DDSD_WIDTH | DDSD_HEIGHT | DDSD_PIXELFORMAT | DDSD_PITCH, px.w, px.h, px.pitch, px.fmt, sf.caps, sf.caps2, 0, 0);
+        let d = build_ddsd(
+            124,
+            DDSD_CAPS | DDSD_WIDTH | DDSD_HEIGHT | DDSD_PIXELFORMAT | DDSD_PITCH,
+            px.w,
+            px.h,
+            px.pitch,
+            px.fmt,
+            sf.caps,
+            sf.caps2,
+            0,
+            0,
+        );
         items.push(vec![CallArg::Val(p), CallArg::Buf(d), CallArg::Val(ctx)]);
     }
     enum_callbacks(cb, items, 0, DD_OK)
@@ -577,7 +630,11 @@ fn dd_get_available_vid_mem(s: &mut Session) -> ApiResult {
         s.mem.write_u32(total, crate::surface::VRAM_SIZE)?;
     }
     if free != 0 {
-        let f = if s.display.vram_heap == 0 { crate::surface::VRAM_SIZE } else { s.vram_free() };
+        let f = if s.display.vram_heap == 0 {
+            crate::surface::VRAM_SIZE
+        } else {
+            s.vram_free()
+        };
         s.mem.write_u32(free, f)?;
     }
     Ok(ApiRet::Ret(DD_OK))
@@ -750,7 +807,11 @@ fn requested_format(s: &Session, ddsd: &[u8], caps: u32) -> Result<Fmt, u32> {
     }
     if caps & DDSCAPS_ZBUFFER != 0 {
         let bits = u32::from_le_bytes(ddsd[24..28].try_into().unwrap());
-        return Ok(if flags & DDSD_ZBUFFERBITDEPTH != 0 && bits == 32 { Fmt::D24S8 } else { Fmt::D16 });
+        return Ok(if flags & DDSD_ZBUFFERBITDEPTH != 0 && bits == 32 {
+            Fmt::D24S8
+        } else {
+            Fmt::D16
+        });
     }
     Ok(s.display_fmt())
 }
@@ -769,7 +830,11 @@ fn dd_create_surface(s: &mut Session) -> ApiResult {
     let g = |o: usize| u32::from_le_bytes(d[o..o + 4].try_into().unwrap());
     let flags = g(4);
     let mut caps = if flags & DDSD_CAPS != 0 { g(104) } else { 0 };
-    let caps2 = if size == 124 && flags & DDSD_CAPS != 0 { g(108) } else { 0 };
+    let caps2 = if size == 124 && flags & DDSD_CAPS != 0 {
+        g(108)
+    } else {
+        0
+    };
     if s.com.ddraw.coop_flags == 0 && s.com.ddraw.exclusive.is_none() && s.com.ddraw.coop_hwnd == 0 {
         let has_level = matches!(s.com_obj(dd).map(|o| &o.kind), Some(ComKind::DirectDraw(x)) if x.coop != 0);
         if !has_level {
@@ -822,13 +887,23 @@ fn dd_create_surface(s: &mut Session) -> ApiResult {
     } else {
         1
     };
-    let ck_dst = (flags & DDSD_CKDESTBLT != 0).then(|| ColorKey { low: g(48), high: g(52) });
-    let ck_src = (flags & DDSD_CKSRCBLT != 0).then(|| ColorKey { low: g(64), high: g(68) });
+    let ck_dst = (flags & DDSD_CKDESTBLT != 0).then(|| ColorKey {
+        low: g(48),
+        high: g(52),
+    });
+    let ck_src = (flags & DDSD_CKSRCBLT != 0).then(|| ColorKey {
+        low: g(64),
+        high: g(68),
+    });
     let epoch = s.com.ddraw.mode_epoch;
     let mk = |s: &mut Session, w: u32, h: u32, caps: u32, caps2: u32, primary: bool, parent: u32| -> Result<u32, u32> {
-        let id = s
-            .alloc_surface(w, h, fmt, !sysmem, caps)
-            .map_err(|_| if sysmem { DDERR_OUTOFMEMORY } else { DDERR_OUTOFVIDEOMEMORY })?;
+        let id = s.alloc_surface(w, h, fmt, !sysmem, caps).map_err(|_| {
+            if sysmem {
+                DDERR_OUTOFMEMORY
+            } else {
+                DDERR_OUTOFVIDEOMEMORY
+            }
+        })?;
         if let Some(sf) = s.display.surfaces.get_mut(&id) {
             sf.ckey_src = ck_src;
             sf.ckey_dst = ck_dst;
@@ -963,7 +1038,10 @@ pub fn surface_qi(s: &mut Session, id: u32, iid: &Guid, ppv: u32) -> Result<Opti
 
 fn sf_self(s: &Session) -> Result<(u32, SurfObj), ApiError> {
     let id = s.this_obj()?;
-    let sf = s.surf(id).cloned().ok_or_else(|| ApiError::Fatal("not a surface".into()))?;
+    let sf = s
+        .surf(id)
+        .cloned()
+        .ok_or_else(|| ApiError::Fatal("not a surface".into()))?;
     Ok((id, sf))
 }
 
@@ -976,7 +1054,11 @@ fn sf_get_surface_desc(s: &mut Session) -> ApiResult {
     }
     let px = s.display.surfaces[&sf.surface].clone();
     let mut flags = DDSD_CAPS | DDSD_HEIGHT | DDSD_WIDTH | DDSD_PIXELFORMAT;
-    flags |= if px.fmt.is_compressed() { DDSD_LINEARSIZE } else { DDSD_PITCH };
+    flags |= if px.fmt.is_compressed() {
+        DDSD_LINEARSIZE
+    } else {
+        DDSD_PITCH
+    };
     let bb = sf.chain.len().saturating_sub(1) as u32;
     if bb > 0 {
         flags |= DDSD_BACKBUFFERCOUNT;
@@ -1071,12 +1153,18 @@ fn sf_lock_now(s: &mut Session, id: u32, sf: &SurfObj, prect: u32, pdesc: u32, f
     let readonly = flags & 0x10 != 0;
     s.surface_cpu_access(sf.surface, !readonly);
     let off = match r {
-        Some(r) if px.fmt.is_compressed() => (r.top as u32 / 4) * px.pitch + (r.left as u32 / 4) * if px.fmt == Fmt::Dxt1 { 8 } else { 16 },
+        Some(r) if px.fmt.is_compressed() => {
+            (r.top as u32 / 4) * px.pitch + (r.left as u32 / 4) * if px.fmt == Fmt::Dxt1 { 8 } else { 16 }
+        }
         Some(r) => r.top as u32 * px.pitch + r.left as u32 * px.fmt.bytes_pp(),
         None => 0,
     };
     let mut fl = DDSD_CAPS | DDSD_HEIGHT | DDSD_WIDTH | DDSD_PIXELFORMAT | DDSD_LPSURFACE;
-    fl |= if px.fmt.is_compressed() { DDSD_LINEARSIZE } else { DDSD_PITCH };
+    fl |= if px.fmt.is_compressed() {
+        DDSD_LINEARSIZE
+    } else {
+        DDSD_PITCH
+    };
     let pitch = if px.fmt.is_compressed() { px.size } else { px.pitch };
     let b = build_ddsd(size, fl, px.w, px.h, pitch, px.fmt, sf.caps, sf.caps2, px.mem + off, 0);
     s.mem.write(pdesc, &b)?;
@@ -1194,7 +1282,18 @@ fn sf_enum_attached_surfaces(s: &mut Session) -> ApiResult {
         s.com_addref(o);
         let px = s.display.surfaces[&s.surf(o).unwrap().surface].clone();
         let so = s.surf(o).unwrap().clone();
-        let d = build_ddsd(124, DDSD_CAPS | DDSD_WIDTH | DDSD_HEIGHT | DDSD_PIXELFORMAT | DDSD_PITCH, px.w, px.h, px.pitch, px.fmt, so.caps, so.caps2, 0, 0);
+        let d = build_ddsd(
+            124,
+            DDSD_CAPS | DDSD_WIDTH | DDSD_HEIGHT | DDSD_PIXELFORMAT | DDSD_PITCH,
+            px.w,
+            px.h,
+            px.pitch,
+            px.fmt,
+            so.caps,
+            so.caps2,
+            0,
+            0,
+        );
         items.push(vec![CallArg::Val(p), CallArg::Buf(d), CallArg::Val(ctx)]);
     }
     let _ = id;
@@ -1565,7 +1664,14 @@ fn blit(s: &mut Session, dst: u32, dr: Rect, src: u32, sr: Rect, o: BltOpts) -> 
     let sp = s.display.surfaces[&src].clone();
     let dp = s.display.surfaces[&dst].clone();
     if sp.fmt.is_compressed() || dp.fmt.is_compressed() {
-        if sp.fmt == dp.fmt && sr.w() == dr.w() && sr.h() == dr.h() && sr.left == 0 && sr.top == 0 && dr.left == 0 && dr.top == 0 {
+        if sp.fmt == dp.fmt
+            && sr.w() == dr.w()
+            && sr.h() == dr.h()
+            && sr.left == 0
+            && sr.top == 0
+            && dr.left == 0
+            && dr.top == 0
+        {
             let n = sp.size.min(dp.size);
             let data = s.mem.read_vec(sp.mem, n)?;
             s.mem.write(dp.mem, &data)?;
@@ -1763,7 +1869,15 @@ fn sf_blt_fast(s: &mut Session) -> ApiResult {
     let dr = Rect::new(x as i32, y as i32, x as i32 + sr.w(), y as i32 + sr.h());
     let full = full_rect(s, dst);
     let sfull = full_rect(s, src);
-    if dr.left < 0 || dr.top < 0 || dr.right > full.right || dr.bottom > full.bottom || sr.left < 0 || sr.top < 0 || sr.right > sfull.right || sr.bottom > sfull.bottom {
+    if dr.left < 0
+        || dr.top < 0
+        || dr.right > full.right
+        || dr.bottom > full.bottom
+        || sr.left < 0
+        || sr.top < 0
+        || sr.right > sfull.right
+        || sr.bottom > sfull.bottom
+    {
         return Ok(ApiRet::Ret(DDERR_INVALIDRECT));
     }
     let mut o = BltOpts::default();
@@ -1818,7 +1932,13 @@ fn pal_set_entries(s: &mut Session) -> ApiResult {
             *slot = v;
         }
     }
-    let users: Vec<u32> = s.display.surfaces.values().filter(|x| x.palette == pid).map(|x| x.id).collect();
+    let users: Vec<u32> = s
+        .display
+        .surfaces
+        .values()
+        .filter(|x| x.palette == pid)
+        .map(|x| x.id)
+        .collect();
     for u in &users {
         if let Some(x) = s.display.surfaces.get_mut(u) {
             x.version += 1;
@@ -1887,7 +2007,11 @@ fn gamma_get_ramp(s: &mut Session) -> ApiResult {
     let mut b = vec![0u8; 1536];
     let g = &s.com.ddraw.gamma;
     for i in 0..768usize {
-        let v = if g.len() == 768 { g[i] } else { ((i % 256) as u16) << 8 | (i % 256) as u16 };
+        let v = if g.len() == 768 {
+            g[i]
+        } else {
+            ((i % 256) as u16) << 8 | (i % 256) as u16
+        };
         b[i * 2..i * 2 + 2].copy_from_slice(&v.to_le_bytes());
     }
     s.mem.write(p, &b)?;

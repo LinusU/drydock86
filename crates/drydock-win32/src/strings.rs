@@ -4,9 +4,9 @@ use crate::api::ApiError;
 use crate::session::Session;
 
 const CP1252_80: [u16; 32] = [
-    0x20AC, 0x0081, 0x201A, 0x0192, 0x201E, 0x2026, 0x2020, 0x2021, 0x02C6, 0x2030, 0x0160, 0x2039,
-    0x0152, 0x008D, 0x017D, 0x008F, 0x0090, 0x2018, 0x2019, 0x201C, 0x201D, 0x2022, 0x2013, 0x2014,
-    0x02DC, 0x2122, 0x0161, 0x203A, 0x0153, 0x009D, 0x017E, 0x0178,
+    0x20AC, 0x0081, 0x201A, 0x0192, 0x201E, 0x2026, 0x2020, 0x2021, 0x02C6, 0x2030, 0x0160, 0x2039, 0x0152, 0x008D,
+    0x017D, 0x008F, 0x0090, 0x2018, 0x2019, 0x201C, 0x201D, 0x2022, 0x2013, 0x2014, 0x02DC, 0x2122, 0x0161, 0x203A,
+    0x0153, 0x009D, 0x017E, 0x0178,
 ];
 
 pub fn ansi_to_utf16(b: &[u8]) -> Vec<u16> {
@@ -47,21 +47,13 @@ impl Session {
         Ok(decode_ansi(&self.mem.read_cstr(p, 0x10000)?))
     }
     pub fn read_str_opt(&self, p: u32) -> Result<Option<String>, ApiError> {
-        if p == 0 {
-            Ok(None)
-        } else {
-            self.read_str(p).map(Some)
-        }
+        if p == 0 { Ok(None) } else { self.read_str(p).map(Some) }
     }
     pub fn read_wstr(&self, p: u32) -> Result<String, ApiError> {
         Ok(String::from_utf16_lossy(&self.mem.read_wstr(p, 0x10000)?))
     }
     pub fn read_wstr_opt(&self, p: u32) -> Result<Option<String>, ApiError> {
-        if p == 0 {
-            Ok(None)
-        } else {
-            self.read_wstr(p).map(Some)
-        }
+        if p == 0 { Ok(None) } else { self.read_wstr(p).map(Some) }
     }
     /// Read a string argument that may be an integer atom/resource id (< 0x10000).
     pub fn read_str_or_id(&self, p: u32) -> Result<StrOrId, ApiError> {
@@ -96,12 +88,7 @@ impl Session {
         Ok(b.len() as u32)
     }
 
-    pub fn write_wstr_buf(
-        &mut self,
-        p: u32,
-        cap_chars: u32,
-        s: &str,
-    ) -> Result<Result<u32, u32>, ApiError> {
+    pub fn write_wstr_buf(&mut self, p: u32, cap_chars: u32, s: &str) -> Result<Result<u32, u32>, ApiError> {
         let w: Vec<u16> = s.encode_utf16().collect();
         if w.len() as u32 + 1 > cap_chars {
             return Ok(Err(w.len() as u32 + 1));

@@ -24,7 +24,14 @@ impl ThunkInfo {
     pub fn new(module: String, name: String, ordinal: u16, conv: Conv, handler: Option<Handler>) -> ThunkInfo {
         let m = module.trim_end_matches(".dll").trim_end_matches(".DLL");
         let full = format!("{m}!{name}").into();
-        ThunkInfo { module, name, ordinal, conv, handler, full }
+        ThunkInfo {
+            module,
+            name,
+            ordinal,
+            conv,
+            handler,
+            full,
+        }
     }
 
     pub fn full_name(&self) -> String {

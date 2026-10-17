@@ -7,8 +7,8 @@
 
 pub mod d3d;
 pub mod ddraw;
-pub mod dmusic;
 pub mod dinput;
+pub mod dmusic;
 pub mod dsound;
 pub mod ole;
 
@@ -165,8 +165,8 @@ impl Session {
         let vt = self.sys_alloc(n * 4)?;
         for (i, m) in def.methods.iter().enumerate() {
             let name = format!("{}::{}", def.name, m.name);
-            let t = crate::loader::internal_thunk(self, def.module, &name, m.conv, m.handler)
-                .map_err(ApiError::Fatal)?;
+            let t =
+                crate::loader::internal_thunk(self, def.module, &name, m.conv, m.handler).map_err(ApiError::Fatal)?;
             self.mem.write_u32(vt + 4 * i as u32, t)?;
         }
         self.com.vtables.insert(def.name.to_string(), vt);
@@ -191,15 +191,18 @@ impl Session {
 
     /// Resolve an interface pointer to its object id.
     pub fn obj_of(&self, ptr: u32) -> Option<u32> {
-        self.com.ptrs.get(&ptr).map(|(o, _)| *o).filter(|o| self.com.objs.contains_key(o))
+        self.com
+            .ptrs
+            .get(&ptr)
+            .map(|(o, _)| *o)
+            .filter(|o| self.com.objs.contains_key(o))
     }
 
     /// The object behind `this` (argument 0) of a COM method call.
     pub fn this_obj(&self) -> Result<u32, ApiError> {
         let this = self.arg(0)?;
-        self.obj_of(this).ok_or_else(|| {
-            ApiError::Fatal(format!("COM method called on unknown interface pointer {this:#x}"))
-        })
+        self.obj_of(this)
+            .ok_or_else(|| ApiError::Fatal(format!("COM method called on unknown interface pointer {this:#x}")))
     }
 
     pub fn com_addref(&mut self, id: u32) -> u32 {
@@ -347,7 +350,11 @@ pub fn query_interface(s: &mut Session) -> ApiResult {
             s.event(
                 crate::diag::Severity::Info,
                 "QueryInterface",
-                format!("{:?} does not implement {}", std::mem::discriminant(&kind), guid_str(&iid)),
+                format!(
+                    "{:?} does not implement {}",
+                    std::mem::discriminant(&kind),
+                    guid_str(&iid)
+                ),
             );
             s.mem.write_u32(ppv, 0)?;
             Ok(ApiRet::Ret(E_NOINTERFACE))

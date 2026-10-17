@@ -79,7 +79,9 @@ fn handler_for(module: &str, name: &str) -> Option<(Conv, Option<Handler>)> {
         let m = def.methods.iter().find(|m| m.name == method)?;
         return Some((m.conv, m.handler));
     }
-    let dll = crate::dll::BUILTINS.iter().find(|d| d.name.eq_ignore_ascii_case(module))?;
+    let dll = crate::dll::BUILTINS
+        .iter()
+        .find(|d| d.name.eq_ignore_ascii_case(module))?;
     let e = dll.parts.iter().flat_map(|p| p.iter()).find(|e| e.name == name)?;
     Some((e.conv, e.handler))
 }
@@ -90,7 +92,12 @@ fn rebind(records: &[ThunkRecord], specials: [u32; 3]) -> Result<Thunks, String>
         let handler = if r.bound {
             match handler_for(&r.module, &r.name) {
                 Some((_, Some(h))) => Some(h),
-                _ => return Err(format!("checkpoint refers to {}!{}, which this build does not implement", r.module, r.name)),
+                _ => {
+                    return Err(format!(
+                        "checkpoint refers to {}!{}, which this build does not implement",
+                        r.module, r.name
+                    ));
+                }
             }
         } else {
             None
@@ -109,12 +116,22 @@ impl Session {
     pub fn checkpoint(&mut self, label: &str) -> Checkpoint {
         self.sync_regs();
         // GPU-only surface contents become guest memory so the snapshot is complete.
-        let ids: Vec<u32> = self.display.surfaces.iter().filter(|(_, s)| s.gpu_dirty).map(|(k, _)| *k).collect();
+        let ids: Vec<u32> = self
+            .display
+            .surfaces
+            .iter()
+            .filter(|(_, s)| s.gpu_dirty)
+            .map(|(k, _)| *k)
+            .collect();
         for id in ids {
             self.surface_cpu_access(id, false);
         }
         let st = self.cpu.state();
-        let cpu = CpuCounters { insns: st.insns, tsc_time_base_ns: st.tsc_time_base_ns, tsc_insn_base: st.tsc_insn_base };
+        let cpu = CpuCounters {
+            insns: st.insns,
+            tsc_time_base_ns: st.tsc_time_base_ns,
+            tsc_insn_base: st.tsc_insn_base,
+        };
         let exe_sha256 = self.modules.get(self.process.exe_module).and_then(|m| m.sha256.clone());
         Checkpoint {
             info: CheckpointInfo {
@@ -135,7 +152,11 @@ impl Session {
             objects: self.objects.clone(),
             modules: self.modules.clone(),
             thunks: self.thunks.records(),
-            thunk_specials: [self.thunks.callback_ret, self.thunks.thread_exit, self.thunks.thread_start],
+            thunk_specials: [
+                self.thunks.callback_ret,
+                self.thunks.thread_exit,
+                self.thunks.thread_start,
+            ],
             vfs: self.vfs.clone(),
             registry: self.registry.clone(),
             heaps: self.heaps.clone(),
@@ -159,7 +180,10 @@ impl Session {
     /// so a checkpoint taken elsewhere runs against this machine's installation.
     pub fn restore(&mut self, cp: &Checkpoint, keep_mounts: bool) -> Result<(), String> {
         if cp.info.format != FORMAT_VERSION {
-            return Err(format!("checkpoint format {} is not supported (expected {FORMAT_VERSION})", cp.info.format));
+            return Err(format!(
+                "checkpoint format {} is not supported (expected {FORMAT_VERSION})",
+                cp.info.format
+            ));
         }
         let thunks = rebind(&cp.thunks, cp.thunk_specials)?;
         self.mem.restore(&cp.mem);
@@ -226,7 +250,8 @@ impl Checkpoint {
         let mut w = std::io::BufWriter::new(f);
         w.write_all(MAGIC).map_err(|e| e.to_string())?;
         let info = serde_json::to_vec(&self.info).map_err(|e| e.to_string())?;
-        w.write_all(&(info.len() as u32).to_le_bytes()).map_err(|e| e.to_string())?;
+        w.write_all(&(info.len() as u32).to_le_bytes())
+            .map_err(|e| e.to_string())?;
         w.write_all(&info).map_err(|e| e.to_string())?;
         let mut z = flate2::write::DeflateEncoder::new(w, flate2::Compression::fast());
         rmp_serde::encode::write(&mut z, self).map_err(|e| e.to_string())?;
@@ -244,7 +269,10 @@ impl Checkpoint {
         let mut r = std::io::BufReader::new(std::fs::File::open(path).map_err(|e| format!("{}: {e}", path.display()))?);
         let info = read_header(&mut r)?;
         if info.format != FORMAT_VERSION {
-            return Err(format!("checkpoint format {} is not supported (expected {FORMAT_VERSION})", info.format));
+            return Err(format!(
+                "checkpoint format {} is not supported (expected {FORMAT_VERSION})",
+                info.format
+            ));
         }
         let z = flate2::read::DeflateDecoder::new(r);
         rmp_serde::decode::from_read(z).map_err(|e| format!("{}: {e}", path.display()))
@@ -293,12 +321,22 @@ mod tests {
     }
 
     fn run_to(s: &mut Session, ms: u64) -> RunStop {
-        s.run(RunLimit { until_ns: ms * 1_000_000, max_insns: None, stop_on_present: false, jump_idle: true })
+        s.run(RunLimit {
+            until_ns: ms * 1_000_000,
+            max_insns: None,
+            stop_on_present: false,
+            jump_idle: true,
+        })
     }
 
     fn observe(s: &mut Session) -> (u64, u64, u32, u32) {
         let data = drydock_fixtures::IMAGE_BASE + 0x2000;
-        (s.clock.now_ns(), s.cpu.state().insns, s.mem.read_u32(data).unwrap(), s.mem.read_u32(data + 4).unwrap())
+        (
+            s.clock.now_ns(),
+            s.cpu.state().insns,
+            s.mem.read_u32(data).unwrap(),
+            s.mem.read_u32(data + 4).unwrap(),
+        )
     }
 
     #[test]
@@ -308,7 +346,10 @@ mod tests {
         assert_eq!(run_to(&mut s, 50), RunStop::TimeReached);
         let cp = s.checkpoint("t50");
         let at_cp = observe(&mut s);
-        assert!(at_cp.2 > 2, "the program made progress before the checkpoint: {at_cp:?}");
+        assert!(
+            at_cp.2 > 2,
+            "the program made progress before the checkpoint: {at_cp:?}"
+        );
         assert_eq!(run_to(&mut s, 200), RunStop::TimeReached);
         let a = observe(&mut s);
         assert!(a.2 > at_cp.2);

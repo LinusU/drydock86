@@ -251,9 +251,15 @@ fn write_artifacts(d: &mut Driver, args: &RunArgs, stop: &RunStop) {
     let dir = args.artifacts.clone().unwrap_or_else(|| "local/artifacts/play".into());
     let _ = std::fs::create_dir_all(&dir);
     let rep = crate::launch::report(d, stop);
-    let _ = std::fs::write(dir.join("report.json"), serde_json::to_vec_pretty(&rep).unwrap_or_default());
+    let _ = std::fs::write(
+        dir.join("report.json"),
+        serde_json::to_vec_pretty(&rep).unwrap_or_default(),
+    );
     let prov = crate::launch::provenance(&d.s, args);
-    let _ = std::fs::write(dir.join("provenance.json"), serde_json::to_vec_pretty(&prov).unwrap_or_default());
+    let _ = std::fs::write(
+        dir.join("provenance.json"),
+        serde_json::to_vec_pretty(&prov).unwrap_or_default(),
+    );
     if let Some((w, h, px)) = d.s.present_rgba() {
         let _ = std::fs::write(dir.join("final.png"), drydock_win32::observe::encode_png(w, h, &px));
     }
@@ -295,8 +301,8 @@ impl Gfx {
             ..Default::default()
         }))
         .map_err(|e| e.to_string())?;
-        let (device, queue) =
-            pollster::block_on(adapter.request_device(&wgpu::DeviceDescriptor::default())).map_err(|e| e.to_string())?;
+        let (device, queue) = pollster::block_on(adapter.request_device(&wgpu::DeviceDescriptor::default()))
+            .map_err(|e| e.to_string())?;
         let size = window.inner_size();
         let config = surface
             .get_default_config(&adapter, size.width.max(1), size.height.max(1))
@@ -430,7 +436,11 @@ impl Gfx {
 
     /// Letterboxed viewport of the guest image inside the window.
     fn viewport(&self) -> (f32, f32, f32, f32) {
-        let (gw, gh) = self.tex.as_ref().map(|t| (t.2 as f32, t.3 as f32)).unwrap_or((640.0, 480.0));
+        let (gw, gh) = self
+            .tex
+            .as_ref()
+            .map(|t| (t.2 as f32, t.3 as f32))
+            .unwrap_or((640.0, 480.0));
         let (ww, wh) = (self.config.width as f32, self.config.height as f32);
         let scale = (ww / gw).min(wh / gh);
         let (vw, vh) = (gw * scale, gh * scale);

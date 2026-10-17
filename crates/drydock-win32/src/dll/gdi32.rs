@@ -17,7 +17,10 @@ use std::sync::OnceLock;
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub enum DcTarget {
     /// Client area (or whole window for GetWindowDC) of a window, on the front surface.
-    Window { hwnd: u32, whole: bool },
+    Window {
+        hwnd: u32,
+        whole: bool,
+    },
     Surface(u32),
     /// Memory DC with a selected bitmap (or the default 1x1 monochrome bitmap).
     Memory,
@@ -55,11 +58,20 @@ pub struct LogFont {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum GdiObj {
     Dc(Dc),
-    Brush { color: u32, null: bool },
-    Pen { color: u32, width: i32, null: bool },
+    Brush {
+        color: u32,
+        null: bool,
+    },
+    Pen {
+        color: u32,
+        width: i32,
+        null: bool,
+    },
     Font(LogFont),
     /// Bitmap backed by a surface.
-    Bitmap { surface: u32 },
+    Bitmap {
+        surface: u32,
+    },
     Palette,
 }
 
@@ -74,22 +86,78 @@ impl Default for GdiState {
         let mut objs = BTreeMap::new();
         // Stock objects at fixed handles.
         let stock: [(u32, GdiObj); 11] = [
-            (0, GdiObj::Brush { color: 0xffffff, null: false }),
-            (1, GdiObj::Brush { color: 0xc0c0c0, null: false }),
-            (2, GdiObj::Brush { color: 0x808080, null: false }),
-            (3, GdiObj::Brush { color: 0x404040, null: false }),
-            (4, GdiObj::Brush { color: 0x000000, null: false }),
+            (
+                0,
+                GdiObj::Brush {
+                    color: 0xffffff,
+                    null: false,
+                },
+            ),
+            (
+                1,
+                GdiObj::Brush {
+                    color: 0xc0c0c0,
+                    null: false,
+                },
+            ),
+            (
+                2,
+                GdiObj::Brush {
+                    color: 0x808080,
+                    null: false,
+                },
+            ),
+            (
+                3,
+                GdiObj::Brush {
+                    color: 0x404040,
+                    null: false,
+                },
+            ),
+            (
+                4,
+                GdiObj::Brush {
+                    color: 0x000000,
+                    null: false,
+                },
+            ),
             (5, GdiObj::Brush { color: 0, null: true }),
-            (6, GdiObj::Pen { color: 0xffffff, width: 1, null: false }),
-            (7, GdiObj::Pen { color: 0, width: 1, null: false }),
-            (8, GdiObj::Pen { color: 0, width: 1, null: true }),
+            (
+                6,
+                GdiObj::Pen {
+                    color: 0xffffff,
+                    width: 1,
+                    null: false,
+                },
+            ),
+            (
+                7,
+                GdiObj::Pen {
+                    color: 0,
+                    width: 1,
+                    null: false,
+                },
+            ),
+            (
+                8,
+                GdiObj::Pen {
+                    color: 0,
+                    width: 1,
+                    null: true,
+                },
+            ),
             (13, GdiObj::Font(system_font("System", 16, 700))),
             (17, GdiObj::Font(system_font("MS Shell Dlg", -11, 400))),
         ];
         for (i, o) in stock {
             objs.insert(STOCK_BASE + i, o);
         }
-        for (i, face) in [(10u32, "Terminal"), (11, "Courier"), (12, "MS Sans Serif"), (16, "Fixedsys")] {
+        for (i, face) in [
+            (10u32, "Terminal"),
+            (11, "Courier"),
+            (12, "MS Sans Serif"),
+            (16, "Fixedsys"),
+        ] {
             objs.insert(STOCK_BASE + i, GdiObj::Font(system_font(face, 16, 400)));
         }
         objs.insert(STOCK_BASE + 15, GdiObj::Palette);
@@ -291,7 +359,8 @@ pub fn fill_solid(s: &mut Session, hdc: u32, r: &Rect, colorref: u32) -> Result<
 
 pub fn create_font(s: &mut Session, height: i32, face: &str) -> u32 {
     let bold = face.to_uppercase().contains("BOLD");
-    s.gdi.add(GdiObj::Font(system_font(face, height, if bold { 700 } else { 400 })))
+    s.gdi
+        .add(GdiObj::Font(system_font(face, height, if bold { 700 } else { 400 })))
 }
 
 pub fn default_gui_font() -> u32 {
@@ -299,7 +368,15 @@ pub fn default_gui_font() -> u32 {
 }
 
 /// DrawText with an explicit font and colour, transparent background.
-pub fn draw_label(s: &mut Session, hdc: u32, font: u32, text: &str, rc: &Rect, fmt: u32, color: u32) -> Result<(), ApiError> {
+pub fn draw_label(
+    s: &mut Session,
+    hdc: u32,
+    font: u32,
+    text: &str,
+    rc: &Rect,
+    fmt: u32,
+    color: u32,
+) -> Result<(), ApiError> {
     let lf = match s.gdi.objs.get(&font) {
         Some(GdiObj::Font(lf)) => lf.clone(),
         _ => system_font("MS Sans Serif", -11, 400),
@@ -348,7 +425,13 @@ fn rectangle(s: &mut Session) -> ApiResult {
     };
     let rc = Rect::new(l as i32 + ox, t as i32 + oy, r as i32 + ox, b as i32 + oy);
     if let Some(c) = brush_color(s, dc.brush) {
-        fill_on(s, id, &clip, &Rect::new(rc.left + 1, rc.top + 1, rc.right - 1, rc.bottom - 1), c)?;
+        fill_on(
+            s,
+            id,
+            &clip,
+            &Rect::new(rc.left + 1, rc.top + 1, rc.right - 1, rc.bottom - 1),
+            c,
+        )?;
     }
     if let Some(GdiObj::Pen { color, null: false, .. }) = s.gdi.objs.get(&dc.pen).cloned() {
         for edge in [
@@ -371,7 +454,10 @@ fn get_stock_object(s: &mut Session) -> ApiResult {
 
 fn create_solid_brush(s: &mut Session) -> ApiResult {
     let [c] = s.args::<1>()?;
-    Ok(ApiRet::Ret(s.gdi.add(GdiObj::Brush { color: c & 0xffffff, null: false })))
+    Ok(ApiRet::Ret(s.gdi.add(GdiObj::Brush {
+        color: c & 0xffffff,
+        null: false,
+    })))
 }
 
 fn create_pen(s: &mut Session) -> ApiResult {
@@ -500,25 +586,49 @@ fn get_device_caps(s: &mut Session) -> ApiResult {
         None => (s.user.mode.width, s.user.mode.height, s.user.mode.bpp),
     };
     let v = match idx {
-        0 => 0x300, // DRIVERVERSION
-        2 => 1,     // TECHNOLOGY: DT_RASDISPLAY
-        4 => w * 254 / 960,  // HORZSIZE (mm at 96 dpi)
+        0 => 0x300,         // DRIVERVERSION
+        2 => 1,             // TECHNOLOGY: DT_RASDISPLAY
+        4 => w * 254 / 960, // HORZSIZE (mm at 96 dpi)
         6 => h * 254 / 960,
-        8 => w,     // HORZRES
-        10 => h,    // VERTRES
-        12 => bpp,  // BITSPIXEL
-        14 => 1,    // PLANES
-        24 => if bpp <= 8 { 20 } else { 0xffff_ffff }, // NUMCOLORS
+        8 => w,    // HORZRES
+        10 => h,   // VERTRES
+        12 => bpp, // BITSPIXEL
+        14 => 1,   // PLANES
+        24 => {
+            if bpp <= 8 {
+                20
+            } else {
+                0xffff_ffff
+            }
+        } // NUMCOLORS
         38 => 0x7e99, // RASTERCAPS
-        40 => 36,   // ASPECTX
+        40 => 36,  // ASPECTX
         42 => 36,
         44 => 51,
         88 | 90 => 96, // LOGPIXELSX/Y
-        104 => if bpp <= 8 { 256 } else { 0 }, // SIZEPALETTE
-        106 => if bpp <= 8 { 20 } else { 0 },  // NUMRESERVED
-        108 => if bpp <= 8 { 18 } else { 24 }, // COLORRES
+        104 => {
+            if bpp <= 8 {
+                256
+            } else {
+                0
+            }
+        } // SIZEPALETTE
+        106 => {
+            if bpp <= 8 {
+                20
+            } else {
+                0
+            }
+        } // NUMRESERVED
+        108 => {
+            if bpp <= 8 {
+                18
+            } else {
+                24
+            }
+        } // COLORRES
         116 => s.user.mode.refresh, // VREFRESH
-        117 => w,  // DESKTOPVERTRES (approx)
+        117 => w,      // DESKTOPVERTRES (approx)
         118 => h,
         _ => {
             s.missing("GetDeviceCaps", format!("index {idx}"));
@@ -561,7 +671,12 @@ struct FontInst {
 fn font_inst(lf: &LogFont) -> FontInst {
     let f = fonts();
     let face = lf.face.to_uppercase();
-    let font = if face.contains("COURIER") || face.contains("MONO") || face.contains("FIXED") || face.contains("TERMINAL") || lf.pitch_family & 3 == 1 {
+    let font = if face.contains("COURIER")
+        || face.contains("MONO")
+        || face.contains("FIXED")
+        || face.contains("TERMINAL")
+        || lf.pitch_family & 3 == 1
+    {
         &f.mono
     } else if face.contains("TIMES") || face.contains("SERIF") && !face.contains("SANS") || face.contains("GEORGIA") {
         &f.serif
@@ -729,7 +844,11 @@ fn get_text_metrics_a(s: &mut Session) -> ApiResult {
     let lf = dc_font(s, hdc);
     let fi = font_inst(&lf);
     let avg = char_advance(&fi, 'x');
-    let max = ('A'..='Z').map(|c| char_advance(&fi, c)).max().unwrap_or(avg).max(char_advance(&fi, 'W'));
+    let max = ('A'..='Z')
+        .map(|c| char_advance(&fi, c))
+        .max()
+        .unwrap_or(avg)
+        .max(char_advance(&fi, 'W'));
     let mut b = vec![0u8; 56];
     let vals: [i32; 11] = [
         fi.ascent + fi.descent,
@@ -782,7 +901,10 @@ fn layout_lines(fi: &FontInst, text: &str, width: i32, fmt: u32) -> Vec<String> 
     let paragraphs: Vec<String> = if single {
         vec![raw.replace(['\r', '\n'], "")]
     } else {
-        raw.replace("\r\n", "\n").split(['\n', '\r']).map(|s| s.to_string()).collect()
+        raw.replace("\r\n", "\n")
+            .split(['\n', '\r'])
+            .map(|s| s.to_string())
+            .collect()
     };
     if single || fmt & 0x10 == 0 {
         return paragraphs;
@@ -825,7 +947,12 @@ pub fn draw_text_a(s: &mut Session) -> ApiResult {
         // DT_CALCRECT
         let w = lines.iter().map(|l| text_width(&fi, l)).max().unwrap_or(0);
         let mut r = rc;
-        r.right = r.left + if fmt & 0x10 != 0 { w.max(0).min(rc.w().max(w)) } else { w };
+        r.right = r.left
+            + if fmt & 0x10 != 0 {
+                w.max(0).min(rc.w().max(w))
+            } else {
+                w
+            };
         r.bottom = r.top + total_h;
         s.write_rect(prc, &r)?;
         return Ok(ApiRet::Ret(total_h as u32));
