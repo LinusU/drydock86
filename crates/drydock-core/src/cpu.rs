@@ -755,6 +755,12 @@ impl Cpu {
         out
     }
 
+    /// Flush Unicorn's software TLB. Unicorn resizes the TLB to the working set only
+    /// when it is flushed.
+    pub fn flush_tlb(&mut self) -> Result<(), String> {
+        self.uc.ctl_flush_tlb().map_err(uc_err)
+    }
+
     /// Flush every translated block (after restoring memory from a checkpoint).
     pub fn flush_all_code(&mut self) -> Result<(), String> {
         self.uc.ctl_flush_tb().map_err(uc_err)?;

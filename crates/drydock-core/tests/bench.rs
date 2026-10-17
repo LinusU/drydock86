@@ -148,3 +148,44 @@ fn bench_call_ret_and_stores() {
         cpu.state().blocks
     );
 }
+
+/// Store throughput as a function of the number of distinct pages touched (shows the
+/// cost of software-TLB misses).
+#[test]
+#[ignore]
+fn bench_stores_across_pages() {
+    for (pages, flush) in [(16u32, false), (512, false), (2048, false), (8192, false), (512, true), (2048, true), (8192, true)] {
+        let mut a = CodeAssembler::new(32).unwrap();
+        let mut outer = a.create_label();
+        let mut inner = a.create_label();
+        a.mov(ebx, 200_000u32 * 16 / pages).unwrap();
+        a.set_label(&mut outer).unwrap();
+        a.mov(edi, 0x100_0000).unwrap();
+        a.mov(ecx, pages).unwrap();
+        a.set_label(&mut inner).unwrap();
+        a.mov(dword_ptr(edi), ecx).unwrap();
+        a.add(edi, 0x1000).unwrap();
+        a.dec(ecx).unwrap();
+        a.jnz(inner).unwrap();
+        a.dec(ebx).unwrap();
+        a.jnz(outer).unwrap();
+        a.int(0x2e).unwrap();
+        let code = a.assemble(0x40_1000).unwrap();
+        let (mut cpu, mut mem) = setup(&code);
+        mem.alloc(Some(0x100_0000), pages * 0x1000, RegionKind::Private, PAGE_READWRITE, "data").unwrap();
+        let t = Instant::now();
+        loop {
+            if flush {
+                cpu.flush_tlb().unwrap();
+            }
+            match cpu.run_slice(&mut mem, 1_000_000, 0).unwrap() {
+                Stop::Budget => continue,
+                Stop::ApiTrap { .. } => break,
+                s => panic!("{s:?}"),
+            }
+        }
+        let dt = t.elapsed().as_secs_f64();
+        let n = cpu.state().insns;
+        eprintln!("{pages:5} pages, flush {flush}: {:.0} MIPS ({n} insns in {dt:.2}s)", n as f64 / dt / 1e6);
+    }
+}
