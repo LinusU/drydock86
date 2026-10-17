@@ -14,6 +14,17 @@ Liberation Serif Regular, Liberation Mono Regular). Digitized data copyright (c)
 Font License 1.1, reproduced in `assets/fonts/LICENSE`. The fonts are used to
 rasterize GDI text for guest programs; they are unmodified.
 
+## Derived from FFmpeg
+
+**Indeo 5 decoder** (`crates/drydock-media/src/indeo5.rs`, `ivi_dsp.rs`,
+`ivi_tables.rs`). A port of FFmpeg n7.1's `libavcodec/indeo5.c`, `ivi.c`,
+`ivi_dsp.c` and `indeo5data.h` to Rust, restricted to the Indeo 5 paths. Copyright
+(c) 2009-2011 Maxim Poliakovski. FFmpeg licenses this code under the GNU Lesser
+General Public License version 2.1 or later; section 3 of that licence allows a
+copy to be distributed under the GNU General Public License instead, and Drydock
+does so, under GPL-2.0, keeping the original copyright notices in each file. The
+tables were converted mechanically from the C sources.
+
 ## Principal dependencies
 
 | Component | Version | Licence | Use |

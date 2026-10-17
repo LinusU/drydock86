@@ -1,6 +1,6 @@
 [package]
 name = "drydock-media"
-description = "Drydock media formats: AVI container parsing"
+description = "Drydock media formats: AVI container parsing, Indeo 5 video decoding"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
@@ -8,3 +8,5 @@ license.workspace = true
 [dependencies]
 thiserror.workspace = true
 
+[dev-dependencies]
+png = "0.17"
