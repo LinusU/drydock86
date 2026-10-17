@@ -468,10 +468,19 @@ impl Vfs {
                 Some(OverlayNode::File { attrs, .. }) => *attrs,
                 _ => FILE_ATTRIBUTE_ARCHIVE,
             };
+            // An existing file keeps the case of its name, as on Windows.
+            let name = match (&node, self.overlay.get(&key)) {
+                (_, Some(OverlayNode::File { name, .. })) => name.clone(),
+                (Some(Node::HostFile(h, _)), _) => h
+                    .file_name()
+                    .map(|n| n.to_string_lossy().into_owned())
+                    .unwrap_or_else(|| p.file_name().to_string()),
+                _ => p.file_name().to_string(),
+            };
             self.overlay.insert(
                 key.clone(),
                 OverlayNode::File {
-                    name: p.file_name().to_string(),
+                    name,
                     data,
                     attrs,
                     mtime: now,
