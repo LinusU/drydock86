@@ -251,7 +251,9 @@ fn parse_strl(d: &[u8], start: usize, end: usize) -> Result<Stream> {
 /// `movi` list type (the usual case) or absolute; the first entry tells which.
 fn read_idx1(d: &[u8], idx: &[u8], movi_start: usize, streams: &mut [Stream]) -> bool {
     let entries: Vec<_> = idx
-        .as_chunks::<16>().0.iter()
+        .as_chunks::<16>()
+        .0
+        .iter()
         .map(|e| {
             (
                 fourcc(e, 0),

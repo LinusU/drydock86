@@ -101,6 +101,7 @@ pub fn builtin_name(name: &str) -> Option<&'static str> {
 /// DLLs installed with the emulated Windows 2000 SP4 (with DirectX 7) profile. A
 /// program that fails to load one of these hit missing platform functionality, not an
 /// absent optional component.
+#[rustfmt::skip]
 const WINDOWS_SYSTEM_DLLS: &[&str] = &[
     "ADVAPI32.DLL", "AVIFIL32.DLL", "COMCTL32.DLL", "COMDLG32.DLL", "CRTDLL.DLL", "D3DIM.DLL", "D3DRM.DLL",
     "D3DXOF.DLL", "DDRAW.DLL", "DINPUT.DLL", "DPLAYX.DLL", "DSOUND.DLL", "DMUSIC.DLL", "DSETUP.DLL", "GDI32.DLL",

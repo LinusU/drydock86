@@ -1250,8 +1250,11 @@ fn load_library_common(s: &mut Session, name: &str) -> ApiResult {
             run_init_calls(base, calls, 0)
         }
         Err(e) => {
-            if crate::loader::is_windows_system_dll(&name) {
-                s.missing("LoadLibrary", format!("{name} is part of the emulated Windows installation but is not provided"));
+            if crate::loader::is_windows_system_dll(name) {
+                s.missing(
+                    "LoadLibrary",
+                    format!("{name} is part of the emulated Windows installation but is not provided"),
+                );
             } else {
                 s.event(Severity::Info, "LoadLibrary", format!("{name}: {e}"));
             }

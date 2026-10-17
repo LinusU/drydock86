@@ -29,12 +29,13 @@ fn main() {
             Err(e) => println!("frame {i}: {e}"),
         }
         if wanted.contains(&i)
-            && let Some(f) = &last {
-                let file = std::fs::File::create(out.join(format!("frame{i:03}.png"))).unwrap();
-                let mut enc = png::Encoder::new(std::io::BufWriter::new(file), f.width as u32, f.height as u32);
-                enc.set_color(png::ColorType::Rgb);
-                enc.write_header().unwrap().write_image_data(&f.to_rgb24()).unwrap();
-            }
+            && let Some(f) = &last
+        {
+            let file = std::fs::File::create(out.join(format!("frame{i:03}.png"))).unwrap();
+            let mut enc = png::Encoder::new(std::io::BufWriter::new(file), f.width as u32, f.height as u32);
+            enc.set_color(png::ColorType::Rgb);
+            enc.write_header().unwrap().write_image_data(&f.to_rgb24()).unwrap();
+        }
     }
     println!("decoded {} frames in {:?}", video.chunks.len(), start.elapsed());
 }
