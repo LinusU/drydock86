@@ -521,6 +521,12 @@ impl Renderer {
         );
     }
 
+    /// Drop every texture (e.g. when the guest state they mirror is replaced).
+    pub fn drop_all_textures(&mut self) {
+        self.flush();
+        self.textures.clear();
+    }
+
     pub fn drop_texture(&mut self, key: u32) {
         self.flush_if_referenced(key);
         self.textures.remove(&key);
