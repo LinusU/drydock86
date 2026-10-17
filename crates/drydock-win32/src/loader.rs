@@ -98,6 +98,26 @@ pub fn builtin_name(name: &str) -> Option<&'static str> {
         .map(|d| d.name)
 }
 
+/// DLLs installed with the emulated Windows 2000 SP4 (with DirectX 7) profile. A
+/// program that fails to load one of these hit missing platform functionality, not an
+/// absent optional component.
+const WINDOWS_SYSTEM_DLLS: &[&str] = &[
+    "ADVAPI32.DLL", "AVIFIL32.DLL", "COMCTL32.DLL", "COMDLG32.DLL", "CRTDLL.DLL", "D3DIM.DLL", "D3DRM.DLL",
+    "D3DXOF.DLL", "DDRAW.DLL", "DINPUT.DLL", "DPLAYX.DLL", "DSOUND.DLL", "DMUSIC.DLL", "DSETUP.DLL", "GDI32.DLL",
+    "GLU32.DLL", "IMAGEHLP.DLL", "IMM32.DLL", "KERNEL32.DLL", "MFC42.DLL", "MPR.DLL", "MSACM32.DLL", "MSIMG32.DLL",
+    "MSVCRT.DLL", "MSVCP60.DLL", "MSVFW32.DLL", "NETAPI32.DLL", "NTDLL.DLL", "OLE32.DLL", "OLEAUT32.DLL",
+    "OPENGL32.DLL", "QUARTZ.DLL", "RICHED20.DLL", "RICHED32.DLL", "RPCRT4.DLL", "SETUPAPI.DLL", "SHELL32.DLL",
+    "SHLWAPI.DLL", "URLMON.DLL", "USER32.DLL", "VERSION.DLL", "WININET.DLL", "WINMM.DLL", "WINSPOOL.DRV",
+    "WS2_32.DLL", "WSOCK32.DLL",
+];
+
+/// Whether `name` is a DLL of the emulated Windows installation.
+pub fn is_windows_system_dll(name: &str) -> bool {
+    let b = basename(name).to_uppercase();
+    let b = if b.contains('.') { b } else { format!("{b}.DLL") };
+    WINDOWS_SYSTEM_DLLS.contains(&b.as_str())
+}
+
 // ---------------------------------------------------------------- builtin images
 
 fn put_u16(v: &mut [u8], o: usize, x: u16) {
