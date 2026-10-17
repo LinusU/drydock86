@@ -156,8 +156,8 @@ pub struct DsBuffer {
     pub volume: i32,
     pub pan: i32,
     pub notify: Vec<(u32, u32)>,
-    /// Play position (bytes) at the last notification check.
-    pub last_pos: u32,
+    /// Absolute frame (on the `frame_at` timeline) at the last notification check.
+    pub last_abs: u64,
     pub p3d: Params3d,
     pub pending_3d: Option<Params3d>,
 }
@@ -211,61 +211,66 @@ impl Session {
     }
 }
 
-/// Bring a buffer's state up to virtual time `now`: end one-shot playback, fire
-/// notifications that the play cursor has passed.
-fn settle(s: &mut Session, id: u32, now: u64) {
-    let Some(b) = s.dsbuf(id).cloned() else {
-        return;
+impl DsBuffer {
+    /// Whether the play cursor passed byte offset `off` while moving from absolute
+    /// frame `last_abs` (inclusive) to `abs` (exclusive).
+    fn passed(&self, off: u32, abs: u64) -> bool {
+        let frames = self.frames().max(1);
+        if abs <= self.last_abs {
+            return false;
+        }
+        if abs - self.last_abs >= frames {
+            return true;
+        }
+        let f = (off / self.fmt.block.max(1) as u32) as u64 % frames;
+        (f + frames - self.last_abs % frames) % frames < abs - self.last_abs
+    }
+}
+
+/// Whether settling would change anything: playback ending or a notification
+/// position being passed. Most ticks have neither, and skip the work.
+fn settle_due(s: &Session, id: u32, now: u64) -> bool {
+    let Some(b) = s.dsbuf(id) else {
+        return false;
     };
     if !b.playing || b.primary {
+        return false;
+    }
+    let abs = b.frame_at(now);
+    if !b.looping && abs >= b.frames().max(1) {
+        return true;
+    }
+    b.notify.iter().any(|(off, _)| *off != 0xffff_ffff && b.passed(*off, abs))
+}
+
+/// Bring a buffer's state up to virtual time `now`: end one-shot playback, fire
+/// notifications that the play cursor has passed. Buffer timelines are never
+/// re-anchored here, so frequent servicing cannot accumulate rounding drift.
+fn settle(s: &mut Session, id: u32, now: u64) {
+    if !settle_due(s, id, now) {
         return;
     }
+    let Some(b) = s.dsbuf(id) else {
+        return;
+    };
     let frames = b.frames().max(1);
     let abs = b.frame_at(now);
-    let mut fire = Vec::new();
-    let mut stopped = false;
-    let new_pos;
-    if !b.looping && abs >= frames {
-        stopped = true;
-        new_pos = 0;
-        // Offsets between the last position and the end, then the stop notification.
-        for (off, ev) in &b.notify {
-            if *off == 0xffff_ffff || (*off >= b.last_pos && *off < b.size) {
-                fire.push(*ev);
-            }
-        }
-    } else {
-        let pos = ((abs % frames) * b.fmt.block as u64) as u32;
-        let wrapped_times = (abs / frames).saturating_sub(b.anchor_frame / frames);
-        for (off, ev) in &b.notify {
-            if *off == 0xffff_ffff {
-                continue;
-            }
-            let passed = if pos >= b.last_pos && wrapped_times == 0 {
-                *off >= b.last_pos && *off < pos
-            } else {
-                *off >= b.last_pos || *off < pos
-            };
-            if passed {
-                fire.push(*ev);
-            }
-        }
-        new_pos = pos;
-    }
-    if let Some(bm) = s.dsbuf_mut(id) {
-        if stopped {
-            bm.playing = false;
-            bm.anchor_frame = 0;
-        } else {
-            // Re-anchor to keep the unwrapped position bounded.
-            let cur = bm.frame_at(now);
-            bm.anchor_frame = cur % frames;
-            bm.anchor_ns = now;
-        }
-        bm.last_pos = new_pos;
-    }
+    let stopped = !b.looping && abs >= frames;
+    let end = if stopped { frames } else { abs };
+    let fire: Vec<u32> = b
+        .notify
+        .iter()
+        .filter(|(off, _)| if *off == 0xffff_ffff { stopped } else { b.passed(*off, end) })
+        .map(|(_, e)| *e)
+        .collect();
+    let bm = s.dsbuf_mut(id).unwrap();
     if stopped {
+        bm.playing = false;
+        bm.anchor_frame = 0;
+        bm.last_abs = 0;
         s.com.dsound.playing.remove(&id);
+    } else {
+        bm.last_abs = abs;
     }
     for h in fire {
         if let Some(crate::objects::KObj::Event { signaled, .. }) = s.objects.by_handle_mut(h) {
@@ -574,7 +579,7 @@ fn ds_create_sound_buffer(s: &mut Session) -> ApiResult {
         volume: 0,
         pan: 0,
         notify: Vec::new(),
-        last_pos: 0,
+        last_abs: 0,
         p3d: Params3d::default(),
         pending_3d: None,
     };
@@ -630,7 +635,7 @@ fn ds_duplicate_sound_buffer(s: &mut Session) -> ApiResult {
     nb.playing = false;
     nb.anchor_frame = 0;
     nb.notify.clear();
-    nb.last_pos = 0;
+    nb.last_abs = 0;
     let owner = b.mem_owner;
     s.com_addref(owner);
     let id = s.com_new(ComKind::DSBuffer(Box::new(nb)));
@@ -736,7 +741,7 @@ fn buf_set_current_position(s: &mut Session) -> ApiResult {
     let p = pos.min(b.size.saturating_sub(1)) / b.fmt.block as u32;
     bm.anchor_frame = p as u64;
     bm.anchor_ns = now;
-    bm.last_pos = p * b.fmt.block as u32;
+    bm.last_abs = p as u64;
     Ok(ApiRet::Ret(DS_OK))
 }
 
@@ -820,6 +825,7 @@ fn buf_stop(s: &mut Session) -> ApiResult {
         bm.playing = false;
         bm.anchor_frame = f;
         bm.anchor_ns = now;
+        bm.last_abs = f;
         s.com.dsound.playing.remove(&id);
         for h in stop_events {
             if let Some(crate::objects::KObj::Event { signaled, .. }) = s.objects.by_handle_mut(h) {
@@ -918,9 +924,9 @@ fn buf_set_frequency(s: &mut Session) -> ApiResult {
     if s.host.audio.is_some() {
         mix_to(s, now);
     }
+    // The unwrapped position carries over, keeping the notification timeline intact.
     let bm = s.dsbuf_mut(id).unwrap();
-    let cur = bm.frame_at(now) % bm.frames().max(1);
-    bm.anchor_frame = cur;
+    bm.anchor_frame = bm.frame_at(now);
     bm.anchor_ns = now;
     bm.freq = f;
     Ok(ApiRet::Ret(DS_OK))
@@ -1426,6 +1432,53 @@ mod tests {
         }
     }
 
+    fn looping_buffer(s: &mut Session, frames: u32, rate: u32, notify: Vec<(u32, u32)>) -> u32 {
+        let size = frames * 2;
+        let mem = s.mem.alloc(None, size.max(0x1000), drydock_core::mem::RegionKind::Private, drydock_core::mem::PAGE_READWRITE, "dsb").unwrap();
+        let b = DsBuffer {
+            primary: false,
+            flags: DSBCAPS_CTRLVOLUME | DSBCAPS_CTRLPOSITIONNOTIFY,
+            mem,
+            size,
+            fmt: Wfx { tag: 1, channels: 1, rate, bits: 16, block: 2 },
+            mem_owner: 0,
+            playing: true,
+            looping: true,
+            anchor_ns: 0,
+            anchor_frame: 0,
+            freq: rate,
+            volume: 0,
+            pan: 0,
+            notify,
+            last_abs: 0,
+            p3d: Params3d::default(),
+            pending_3d: None,
+        };
+        let id = s.com_new(ComKind::DSBuffer(Box::new(b)));
+        s.com.dsound.buffers.insert(id);
+        s.com.dsound.playing.insert(id);
+        id
+    }
+
+    /// Frequent servicing must not slow the play cursor down: after one virtual
+    /// second at 22050 Hz the cursor has advanced exactly 22050 frames.
+    #[test]
+    fn play_cursor_does_not_drift_under_frequent_service() {
+        let mut s = crate::testutil::session_with(&drydock_fixtures::exit_with(0));
+        s.com.dsound.created = true;
+        let (ev, _) = s.objects.create_handle(crate::objects::KObj::Event { signaled: false, manual: true }, None);
+        // 1000-frame loop with a notification at its middle.
+        let id = looping_buffer(&mut s, 1000, 22050, vec![(1000, ev)]);
+        let mut t = 0;
+        while t < 1_000_000_000 {
+            t += 37_000; // ~27k service ticks per second
+            s.clock.advance_to(t);
+            service(&mut s);
+        }
+        let b = s.dsbuf(id).unwrap();
+        assert_eq!(b.frame_at(1_000_000_000) % 1000, 22050 % 1000, "cursor position after 1 s");
+    }
+
     #[test]
     fn looping_buffer_is_audible_across_service_ticks() {
         let mut s = crate::testutil::session_with(&drydock_fixtures::exit_with(0));
@@ -1452,7 +1505,7 @@ mod tests {
             volume: 0,
             pan: 0,
             notify: Vec::new(),
-            last_pos: 0,
+            last_abs: 0,
             p3d: Params3d::default(),
             pending_3d: None,
         };
