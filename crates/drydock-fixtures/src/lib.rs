@@ -4,6 +4,8 @@
 //! so tests never depend on third-party binaries. Images have a fixed base and no
 //! relocations, an import table, an initialised data section and one code section.
 
+pub mod media;
+
 use iced_x86::IcedError;
 use iced_x86::code_asm::CodeAssembler;
 use std::collections::HashMap;

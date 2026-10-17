@@ -1,6 +1,6 @@
 [package]
 name = "drydock-fixtures"
-description = "Generates small, self-authored PE32 test programs for Drydock's test suite"
+description = "Generates small, self-authored PE32 test programs and media files for Drydock's test suite"
 version.workspace = true
 edition.workspace = true
 license.workspace = true

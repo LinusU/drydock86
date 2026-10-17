@@ -766,6 +766,7 @@ dependencies = [
 name = "drydock-media"
 version = "0.1.0"
 dependencies = [
+ "drydock-fixtures",
  "png",
  "thiserror 2.0.21",
 ]
