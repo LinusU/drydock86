@@ -134,6 +134,10 @@ pub struct DSoundGlobal {
     pub buffers: std::collections::BTreeSet<u32>,
     /// Subset of `buffers` that are currently playing.
     pub playing: std::collections::BTreeSet<u32>,
+    /// Cached earliest buffer event (end of playback, notification), or `None` when
+    /// it must be recomputed. Cleared by every buffer mutation.
+    #[serde(skip)]
+    pub due: std::cell::Cell<Option<Option<u64>>>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -198,6 +202,7 @@ impl Session {
         }
     }
     fn dsbuf_mut(&mut self, id: u32) -> Option<&mut DsBuffer> {
+        self.com.dsound.due.set(None);
         match &mut self.com_obj_mut(id)?.kind {
             ComKind::DSBuffer(b) => Some(b),
             _ => None,
@@ -281,15 +286,30 @@ fn settle(s: &mut Session, id: u32, now: u64) {
 
 pub fn next_event(s: &Session) -> Option<u64> {
     let now = s.clock.now_ns();
+    let mut t = buffer_due(s).filter(|x| *x > now);
+    if s.host.audio.is_some() && s.com.dsound.created {
+        let m = s.com.dsound.mixed_until + MIX_TICK_NS;
+        if m > now {
+            t = Some(t.map_or(m, |y| y.min(m)));
+        }
+    }
+    t
+}
+
+/// Earliest future buffer event, cached until the next buffer mutation.
+fn buffer_due(s: &Session) -> Option<u64> {
+    let now = s.clock.now_ns();
+    if let Some(d) = s.com.dsound.due.get()
+        && d.is_none_or(|x| x > now)
+    {
+        return d;
+    }
     let mut t: Option<u64> = None;
     let mut take = |x: u64| {
         if x > now {
             t = Some(t.map_or(x, |y| y.min(x)));
         }
     };
-    if s.host.audio.is_some() && s.com.dsound.created {
-        take(s.com.dsound.mixed_until + MIX_TICK_NS);
-    }
     for id in &s.com.dsound.playing {
         let Some(b) = s.dsbuf(*id) else { continue };
         if !b.playing || b.primary {
@@ -307,7 +327,7 @@ pub fn next_event(s: &Session) -> Option<u64> {
             }
             let f = (*off / b.fmt.block.max(1) as u32) as u64;
             let mut target = base + f;
-            if target <= abs {
+            if target < abs {
                 target += frames;
             }
             if !b.looping && target > frames {
@@ -316,6 +336,7 @@ pub fn next_event(s: &Session) -> Option<u64> {
             take(b.time_of_frame(target + 1));
         }
     }
+    s.com.dsound.due.set(Some(t));
     t
 }
 
@@ -329,9 +350,16 @@ pub fn service(s: &mut Session) {
     if s.host.audio.is_some() && now >= s.com.dsound.mixed_until + MIX_TICK_NS {
         mix_to(s, now);
     }
+    // Nothing can change before the next buffer event.
+    if let Some(d) = s.com.dsound.due.get()
+        && d.is_none_or(|x| x > now)
+    {
+        return;
+    }
     for id in s.playing_ids() {
         settle(s, id, now);
     }
+    s.com.dsound.due.set(None);
 }
 
 fn db_to_gain(v: i32) -> f32 {
@@ -645,6 +673,7 @@ fn ds_duplicate_sound_buffer(s: &mut Session) -> ApiResult {
 }
 
 pub fn buffer_destroyed(s: &mut Session, id: u32, b: DsBuffer) {
+    s.com.dsound.due.set(None);
     s.com.dsound.buffers.remove(&id);
     s.com.dsound.playing.remove(&id);
     if b.mem_owner == id {
