@@ -264,8 +264,12 @@ fn sync_target(s: &mut Session, id: u32) -> Result<(), String> {
     r.ensure_texture(id, sf.w, sf.h, 1, fmt);
     if sf.cpu_dirty || !existed {
         if fmt == gfx::TexFormat::Depth {
-            let z = depth_value_of(s, id);
-            clear_depth_full(s, id, z)?;
+            let z = depth_values(s, id);
+            if z.iter().all(|v| *v == z[0]) {
+                clear_depth_full(s, id, z.first().copied().unwrap_or(1.0))?;
+            } else {
+                s.renderer()?.upload_depth(id, sf.w, sf.h, &z);
+            }
         } else if let Some((w, h, px)) = decode_rgba(s, id) {
             s.renderer()?.upload(id, 0, w, h, &px);
         }
@@ -277,24 +281,26 @@ fn sync_target(s: &mut Session, id: u32) -> Result<(), String> {
     Ok(())
 }
 
-/// The value a CPU-side depth buffer holds (uniform contents are representable).
-fn depth_value_of(s: &mut Session, id: u32) -> f32 {
-    let sf = s.display.surfaces[&id].clone();
-    let raw = s.mem.read_vec(sf.mem, sf.fmt.bytes_pp().min(sf.size)).unwrap_or_default();
-    let mut b = [0u8; 4];
-    b[..raw.len()].copy_from_slice(&raw);
-    let v = u32::from_le_bytes(b);
-    let z = match sf.fmt {
-        Fmt::D16 => (v & 0xffff) as f32 / 65535.0,
-        Fmt::D24S8 => (v >> 8) as f32 / 16_777_215.0,
-        _ => v as f32 / u32::MAX as f32,
-    };
-    // Non-uniform CPU-written depth contents cannot be uploaded; report it.
-    let all = s.mem.read_vec(sf.mem, sf.pitch * sf.h).unwrap_or_default();
-    if all.chunks(sf.fmt.bytes_pp() as usize).any(|c| c != &raw[..]) {
-        s.missing("depth", "guest-written non-uniform depth buffer contents are not uploaded to the GPU".into());
+/// Per-pixel depth values of a CPU-side depth buffer, in [0, 1].
+fn depth_values(s: &Session, id: u32) -> Vec<f32> {
+    let sf = &s.display.surfaces[&id];
+    let bpp = sf.fmt.bytes_pp() as usize;
+    let data = s.mem.read_vec(sf.mem, sf.pitch * sf.h).unwrap_or_default();
+    let mut out = Vec::with_capacity((sf.w * sf.h) as usize);
+    for y in 0..sf.h as usize {
+        for x in 0..sf.w as usize {
+            let o = y * sf.pitch as usize + x * bpp;
+            let mut b = [0u8; 4];
+            b[..bpp].copy_from_slice(&data[o..o + bpp]);
+            let v = u32::from_le_bytes(b);
+            out.push(match sf.fmt {
+                Fmt::D16 => (v & 0xffff) as f32 / 65535.0,
+                Fmt::D24S8 => (v >> 8) as f32 / 16_777_215.0,
+                _ => (v as f64 / u32::MAX as f64) as f32,
+            });
+        }
     }
-    z
+    out
 }
 
 fn clear_depth_full(s: &mut Session, id: u32, z: f32) -> Result<(), String> {
