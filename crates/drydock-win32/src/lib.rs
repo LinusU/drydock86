@@ -19,6 +19,7 @@ pub mod seh;
 pub mod session;
 pub mod strings;
 pub mod surface;
+pub mod surface_dxt;
 pub mod sync;
 pub mod thunks;
 pub mod vfs;

@@ -156,6 +156,11 @@ pub struct ProcessState {
 pub struct Host {
     pub cancel: Arc<AtomicBool>,
     pub api_breaks: Vec<String>,
+    pub gpu_options: drydock_gfx::GpuOptions,
+    pub renderer: Option<drydock_gfx::Renderer>,
+    pub gpu_error: Option<String>,
+    /// Guest-memory version last uploaded per surface.
+    pub gpu_versions: std::collections::HashMap<u32, u64>,
 }
 
 pub struct Session {

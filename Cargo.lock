@@ -472,6 +472,7 @@ version = "0.1.0"
 dependencies = [
  "drydock-core",
  "drydock-fixtures",
+ "drydock-gfx",
  "fontdue",
  "hex",
  "log",
