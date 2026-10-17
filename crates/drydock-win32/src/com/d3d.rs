@@ -1188,13 +1188,19 @@ fn submit_draw(s: &mut Session, prim: u32, fvf: u32, verts: Vec<gfx::Vertex>, in
     let pre = fvf & 0xe == 0x4;
     let u = build_uniforms(s, &d, pre, fvf, tw, th);
     let pipe = pipe_for(&d, topo, depth.is_some());
-    let vp = gfx::Viewport {
-        x: d.viewport.x as f32,
-        y: d.viewport.y as f32,
-        w: d.viewport.w as f32,
-        h: d.viewport.h as f32,
-        min_z: d.viewport.min_z,
-        max_z: d.viewport.max_z,
+    // Transformed vertices carry absolute screen coordinates and depth; the
+    // viewport only bounds them (through the scissor below).
+    let vp = if pre {
+        gfx::Viewport { x: 0.0, y: 0.0, w: tw, h: th, min_z: 0.0, max_z: 1.0 }
+    } else {
+        gfx::Viewport {
+            x: d.viewport.x as f32,
+            y: d.viewport.y as f32,
+            w: d.viewport.w as f32,
+            h: d.viewport.h as f32,
+            min_z: d.viewport.min_z,
+            max_z: d.viewport.max_z,
+        }
     };
     let scissor = [d.viewport.x, d.viewport.y, d.viewport.w, d.viewport.h];
     let samplers = [sampler_for(&d, 0), sampler_for(&d, 1)];
