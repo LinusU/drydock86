@@ -1,0 +1,5 @@
+/target
+# Local, game-derived acceptance data (installation paths, recordings, captures, saves).
+/local/
+*.ddck
+.DS_Store

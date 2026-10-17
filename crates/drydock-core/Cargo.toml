@@ -1,0 +1,17 @@
+[package]
+name = "drydock-core"
+description = "Drydock guest execution core: address space, PE images, CPU, virtual clock"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+unicorn-engine.workspace = true
+iced-x86.workspace = true
+serde.workspace = true
+thiserror.workspace = true
+log.workspace = true
+rustc-hash.workspace = true
+
+[dev-dependencies]
+iced-x86 = { workspace = true, features = ["code_asm"] }
