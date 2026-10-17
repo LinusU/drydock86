@@ -2918,6 +2918,7 @@ fn deliver_input(s: &mut Session, at: u64, ev: InputEvent) {
     s.user.input.apply_state(&ev);
     s.user.input.log.push((at, ev));
     s.user.input.recorded.push(input::TimedInput { at_ns: at, ev });
+    crate::com::dinput::on_input(s, at, &ev);
     let time = ((at + crate::dll::kernel32::UPTIME_AT_START_NS) / 1_000_000) as u32;
     let pt = (s.user.input.mouse_x, s.user.input.mouse_y);
     match ev {
