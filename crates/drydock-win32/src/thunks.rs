@@ -32,6 +32,8 @@ pub struct ThunkRecord {
     pub name: String,
     pub ordinal: u16,
     pub conv: Conv,
+    /// Whether a Rust handler was bound (unbound thunks report "unimplemented").
+    pub bound: bool,
 }
 
 #[derive(Default, Clone)]
@@ -70,6 +72,7 @@ impl Thunks {
                 name: t.name.clone(),
                 ordinal: t.ordinal,
                 conv: t.conv,
+                bound: t.handler.is_some(),
             })
             .collect();
         v.sort_by_key(|r| r.addr);

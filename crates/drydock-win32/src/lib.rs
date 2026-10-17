@@ -5,6 +5,7 @@
 //! with stable internal ids, so it can be inspected, driven and checkpointed.
 
 pub mod api;
+pub mod checkpoint;
 pub mod com;
 pub mod diag;
 pub mod dll;

@@ -258,6 +258,38 @@ impl Session {
     }
 }
 
+/// Every interface definition, for re-binding vtable thunks after a restore.
+pub static ALL_IFACES: &[&IfaceDef] = &[
+    &dinput::IDIRECTINPUTA,
+    &dinput::IDIRECTINPUT2A,
+    &dinput::IDIRECTINPUT7A,
+    &dinput::IDIRECTINPUTDEVICEA,
+    &dinput::IDIRECTINPUTDEVICE2A,
+    &dinput::IDIRECTINPUTDEVICE7A,
+    &dsound::IDIRECTSOUND,
+    &dsound::IDIRECTSOUNDBUFFER,
+    &dsound::IDIRECTSOUNDNOTIFY,
+    &dsound::IDIRECTSOUND3DLISTENER,
+    &dsound::IDIRECTSOUND3DBUFFER,
+    &ole::ICLASSFACTORY,
+    &dmusic::IDIRECTMUSIC,
+    &dmusic::IDIRECTMUSIC2,
+    &dmusic::IDIRECTMUSICPORT,
+    &dmusic::IDIRECTMUSICPERFORMANCE,
+    &dmusic::IDIRECTMUSICPERFORMANCE2,
+    &dmusic::IDIRECTMUSICLOADER,
+    &dmusic::IDIRECTMUSICCOMPOSER,
+    &d3d::IDIRECT3D7,
+    &d3d::IDIRECT3DDEVICE7,
+    &d3d::IDIRECT3DVERTEXBUFFER7,
+    &ddraw::IDIRECTDRAW7,
+    &ddraw::IDIRECTDRAW,
+    &ddraw::IDIRECTDRAWSURFACE7,
+    &ddraw::IDIRECTDRAWPALETTE,
+    &ddraw::IDIRECTDRAWCLIPPER,
+    &ddraw::IDIRECTDRAWGAMMACONTROL,
+];
+
 /// Interfaces each object kind answers to QueryInterface with.
 fn supported(kind: &ComKind) -> Vec<&'static IfaceDef> {
     match kind {

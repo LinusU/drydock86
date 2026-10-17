@@ -212,7 +212,7 @@ struct HostCache {
     files: HashMap<PathBuf, std::fs::File>,
 }
 
-#[derive(Serialize, Deserialize)]
+#[derive(Clone, Serialize, Deserialize)]
 pub struct Vfs {
     pub mounts: Vec<Mount>,
     pub drives: BTreeMap<char, Drive>,
@@ -227,6 +227,13 @@ pub struct Vfs {
 
 #[derive(Default)]
 struct HostCacheCell(std::cell::RefCell<HostCache>);
+
+impl Clone for HostCacheCell {
+    /// The host lookup cache is rebuilt on demand rather than copied.
+    fn clone(&self) -> Self {
+        HostCacheCell::default()
+    }
+}
 
 impl Vfs {
     pub fn new() -> Self {
