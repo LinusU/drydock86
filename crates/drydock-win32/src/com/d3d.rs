@@ -1112,13 +1112,16 @@ fn build_uniforms(s: &Session, d: &Device, pretransformed: bool, fvf: u32, tw: f
         let has_tex = d.textures[st] != 0;
         u.stages[st] = gfx::GpuStage {
             ops: [t[1], t[2], t[3], t[4]],
-            ops2: [t[5], t[6], t[11] & 0xffff, has_tex as u32],
+            ops2: [t[5], t[6], t[11], has_tex as u32],
+            tt: [t[24] & 0xff, (t[24] & 0x100 != 0) as u32, 0, 0],
+            texmat: d.transforms.get(&(16 + st as u32)).copied().unwrap_or(IDENTITY),
         };
     }
     // A disabled stage 0 colour op ends the cascade at the diffuse colour.
     if d.tss[0][1] == 1 {
         u.stages[0].ops = [2, 0, 0, 2];
         u.stages[0].ops2 = [0, 0, 0, 0];
+        u.stages[0].tt = [0; 4];
         u.stages[1].ops[0] = 1;
     }
     let _ = s;
@@ -1614,11 +1617,8 @@ fn dev_set_texture_stage_state(s: &mut Session) -> ApiResult {
     if stage >= 8 || ty >= 32 {
         return Ok(ApiRet::Ret(D3DERR_INVALIDCALL));
     }
-    if stage < 2 && ty == 11 && (v >> 16) != 0 {
+    if stage < 2 && ty == 11 && (v >> 16) > 3 {
         s.missing("SetTextureStageState", format!("texture coordinate generation {:#x}", v >> 16));
-    }
-    if stage < 2 && ty == 24 && v != 0 {
-        s.missing("SetTextureStageState", "texture coordinate transforms".into());
     }
     if stage >= 2 && ty == 1 && v != 1 {
         s.missing("SetTextureStageState", format!("stage {stage} colour op {v}"));

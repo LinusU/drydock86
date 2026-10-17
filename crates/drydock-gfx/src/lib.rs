@@ -144,6 +144,9 @@ pub struct GpuLight {
 pub struct GpuStage {
     pub ops: [u32; 4],
     pub ops2: [u32; 4],
+    /// Texture transform: element count (0 = disabled), projected flag.
+    pub tt: [u32; 4],
+    pub texmat: [f32; 16],
 }
 
 /// Uniform block of the fixed-function shader (layout mirrors `ff.wgsl`).

@@ -16,7 +16,9 @@ struct Light {
 
 struct Stage {
     ops: vec4<u32>,           // colorop, colorarg1, colorarg2, alphaop
-    ops2: vec4<u32>,          // alphaarg1, alphaarg2, texcoord index, has texture
+    ops2: vec4<u32>,          // alphaarg1, alphaarg2, texcoord index (+texgen << 16), has texture
+    tt: vec4<u32>,            // texture transform count, projected, 0, 0
+    texmat: mat4x4<f32>,
 };
 
 struct U {
@@ -73,8 +75,9 @@ struct VOut {
     @builtin(position) clip: vec4<f32>,
     @location(0) diffuse: vec4<f32>,
     @location(1) specular: vec4<f32>,
-    @location(2) uv0: vec2<f32>,
-    @location(3) uv1: vec2<f32>,
+    // Per-stage coordinates (after generation and transform), xy + projective w.
+    @location(2) uv0: vec3<f32>,
+    @location(3) uv1: vec3<f32>,
     @location(4) fog_depth: vec2<f32>,  // x: vertex fog factor, y: eye depth (or z)
 };
 
@@ -176,9 +179,47 @@ fn vs_main(v: VIn) -> VOut {
     }
     o.diffuse = diffuse;
     o.specular = specular;
-    o.uv0 = v.uv0;
-    o.uv1 = v.uv1;
+    // Camera-space inputs for texture coordinate generation.
+    var cs_pos = vec3<f32>(0.0);
+    var cs_n = vec3<f32>(0.0, 0.0, 1.0);
+    if ((bits & F_PRETRANSFORMED) == 0u) {
+        cs_pos = (u.view * (u.world * vec4<f32>(v.pos.xyz, 1.0))).xyz;
+        cs_n = normalize((u.normal_mat * vec4<f32>(v.normal, 0.0)).xyz + vec3<f32>(0.0, 0.0, 1e-9));
+    }
+    o.uv0 = stage_coords(0u, v, cs_pos, cs_n);
+    o.uv1 = stage_coords(1u, v, cs_pos, cs_n);
     return o;
+}
+
+fn stage_coords(s: u32, v: VIn, cs_pos: vec3<f32>, cs_n: vec3<f32>) -> vec3<f32> {
+    let st = u.stages[s];
+    let tci = st.ops2.z;
+    let gen = tci >> 16u;
+    var t: vec4<f32>;
+    if (gen == 1u) {
+        t = vec4<f32>(cs_n, 1.0);
+    } else if (gen == 2u) {
+        t = vec4<f32>(cs_pos, 1.0);
+    } else if (gen == 3u) {
+        let e = normalize(cs_pos + vec3<f32>(0.0, 0.0, 1e-9));
+        t = vec4<f32>(reflect(e, cs_n), 1.0);
+    } else {
+        let src = select(v.uv0, v.uv1, (tci & 0xffffu) == 1u);
+        t = vec4<f32>(src, 1.0, 0.0);
+    }
+    let count = st.tt.x;
+    if (count == 0u) {
+        return vec3<f32>(t.xy, 1.0);
+    }
+    let r = st.texmat * t;
+    if (st.tt.y != 0u) {
+        // Projected: divide by the last used component.
+        var w = r.w;
+        if (count == 2u) { w = r.y; }
+        if (count == 3u) { w = r.z; }
+        return vec3<f32>(r.xy, w);
+    }
+    return vec3<f32>(r.xy, 1.0);
 }
 
 fn arg(a: u32, diffuse: vec4<f32>, current: vec4<f32>, texel: vec4<f32>, spec: vec4<f32>, temp: vec4<f32>) -> vec4<f32> {
@@ -247,8 +288,8 @@ fn fs_main(i: VOut) -> @location(0) vec4<f32> {
     }
     var current = i.diffuse;
     var temp = vec4<f32>(0.0);
-    let t0 = textureSample(tex0, samp0, select(i.uv0, i.uv1, u.stages[0].ops2.z == 1u));
-    let t1 = textureSample(tex1, samp1, select(i.uv0, i.uv1, u.stages[1].ops2.z == 1u));
+    let t0 = textureSample(tex0, samp0, i.uv0.xy / i.uv0.z);
+    let t1 = textureSample(tex1, samp1, i.uv1.xy / i.uv1.z);
     var keyed = false;
     for (var s = 0u; s < 2u; s = s + 1u) {
         let st = u.stages[s];
