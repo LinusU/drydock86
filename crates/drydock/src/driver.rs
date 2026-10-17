@@ -78,12 +78,9 @@ impl Driver {
                     w.min(target)
                 }
             };
-            let stop = self.s.run(RunLimit {
-                until_ns: until,
-                max_insns: None,
-                stop_on_present,
-                jump_idle: self.pacing == Pacing::Unthrottled,
-            });
+            // Idle periods are skipped inside the session in both modes; in realtime
+            // `until` is bounded by the host clock, so this never runs ahead of it.
+            let stop = self.s.run(RunLimit { until_ns: until, max_insns: None, stop_on_present, jump_idle: true });
             match stop {
                 RunStop::TimeReached => continue,
                 RunStop::Idle { next_event } => {
