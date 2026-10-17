@@ -85,9 +85,11 @@ thunks in the same images.
 - a breakpoint or watchpoint,
 - a fault (unmapped/protected access, invalid instruction, CPU exception).
 
-The block hook counts retired instructions by decoding each translated block once
-with iced-x86 and caching the count; no per-instruction callback runs during normal
-execution. Full block tracing is an opt-in bounded ring.
+A block hook (a plain C callback) counts retired instructions per executed block;
+the vendored Unicorn passes each block's instruction count with the hook arguments,
+so nothing is decoded at run time and no per-instruction callback runs during normal
+execution. A stop requested by the hook takes effect before the block runs, so budget
+stops land exactly on block boundaries. Full block tracing is an opt-in bounded ring.
 
 On a trap the session dispatches the thunk's handler with the guest stack in place.
 Handlers read arguments from `[esp+4..]`, write results to guest memory, and return
