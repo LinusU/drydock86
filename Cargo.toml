@@ -35,3 +35,7 @@ opt-level = 3
 
 [profile.release]
 debug = 1
+
+# Unicorn 2.1.5 with the store fast-path fix in vendor/patches (see vendor/README.md).
+[patch.crates-io]
+unicorn-engine-sys = { path = "vendor/unicorn-engine-sys" }
