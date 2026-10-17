@@ -1,11 +1,22 @@
 use anyhow::{Context, Result, bail};
 use drydock_win32::reg::Registry;
-use drydock_win32::session::{RunLimit, RunStop, Session, SessionConfig, WindowsProfile};
+use drydock_win32::session::{RunStop, Session, SessionConfig, WindowsProfile};
 use drydock_win32::vfs::{self, GuestPath, Vfs};
 use std::path::PathBuf;
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, clap::ValueEnum)]
+pub enum Mode {
+    /// Desktop window, realtime pacing, host input and audio.
+    Play,
+    /// No window; scenario or fixed-duration run.
+    Headless,
+}
+
 #[derive(clap::Args, Clone)]
 pub struct RunArgs {
+    /// play (window) or headless.
+    #[arg(long, value_enum, default_value_t = Mode::Headless)]
+    pub mode: Mode,
     /// Executable: a path relative to --root, or a host path inside it.
     #[arg(long)]
     pub exe: PathBuf,
@@ -55,6 +66,9 @@ pub struct RunArgs {
     /// Restrict graphics backends (vulkan, metal, gl, dx12).
     #[arg(long = "gpu-backend")]
     pub gpu_backend: Vec<String>,
+    /// In play mode, stop after --seconds of virtual time.
+    #[arg(long)]
+    pub play_limit: bool,
     /// Attach a virtual joystick.
     #[arg(long)]
     pub joystick: bool,

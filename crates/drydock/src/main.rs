@@ -3,6 +3,7 @@
 mod driver;
 mod inspect;
 mod launch;
+mod player;
 mod scenario;
 
 use anyhow::Result;
@@ -36,6 +37,9 @@ fn main() -> Result<()> {
     let cli = Cli::parse();
     match cli.cmd {
         Cmd::Inspect { exe, json } => inspect::run(&exe, json),
-        Cmd::Run(a) => launch::run(a),
+        Cmd::Run(a) => match a.mode {
+            launch::Mode::Play => player::run(a),
+            launch::Mode::Headless => launch::run(a),
+        },
     }
 }
