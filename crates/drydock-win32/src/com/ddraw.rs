@@ -1537,6 +1537,27 @@ struct BltOpts {
     mirror_ud: bool,
 }
 
+/// Copy a rectangle between surfaces of the same format (no keys, no stretching).
+pub fn copy_rect(s: &mut Session, dst: u32, dr: Rect, src: u32, sr: Rect) -> Result<(), ApiError> {
+    blit(s, dst, dr, src, sr, BltOpts::default())
+}
+
+/// Mip chain of a surface object: the object itself followed by its sublevels.
+pub fn mip_chain(s: &Session, obj: u32) -> Vec<u32> {
+    let mut out = vec![obj];
+    let mut cur = obj;
+    while let Some(next) = s.surf(cur).and_then(|sf| {
+        sf.attached
+            .iter()
+            .copied()
+            .find(|a| s.surf(*a).is_some_and(|x| x.caps2 & DDSCAPS2_MIPMAPSUBLEVEL != 0))
+    }) {
+        out.push(next);
+        cur = next;
+    }
+    out
+}
+
 /// CPU blit between surfaces with optional stretching (nearest) and colour keys.
 fn blit(s: &mut Session, dst: u32, dr: Rect, src: u32, sr: Rect, o: BltOpts) -> Result<(), ApiError> {
     s.surface_cpu_access(src, false);

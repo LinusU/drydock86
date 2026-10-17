@@ -1921,6 +1921,50 @@ fn dev_create_state_block(s: &mut Session) -> ApiResult {
     Ok(ApiRet::Ret(D3D_OK))
 }
 
+/// IDirect3DDevice7::Load: copy texture contents (whole mip chain for full loads).
+fn dev_load(s: &mut Session) -> ApiResult {
+    let [_this, dst_p, ppoint, src_p, prect, _flags] = s.args::<6>()?;
+    let (Some(dobj), Some(sobj)) = (s.surface_obj_of_ptr(dst_p), s.surface_obj_of_ptr(src_p)) else {
+        return Ok(ApiRet::Ret(D3DERR_INVALIDCALL));
+    };
+    let dchain = super::ddraw::mip_chain(s, dobj);
+    let schain = super::ddraw::mip_chain(s, sobj);
+    let (px, py) = if ppoint != 0 { (s.mem.read_i32(ppoint)?, s.mem.read_i32(ppoint + 4)?) } else { (0, 0) };
+    let srect = if prect != 0 { Some(s.read_rect(prect)?) } else { None };
+    // Source levels are matched to destination levels of the same size.
+    for (k, d) in dchain.iter().enumerate() {
+        let Some(did) = s.surface_of_obj(*d) else { continue };
+        let (dw, dh, dfmt) = {
+            let p = &s.display.surfaces[&did];
+            (p.w, p.h, p.fmt)
+        };
+        let Some(sobj_l) = schain.iter().copied().find(|o| {
+            s.surface_of_obj(*o).is_some_and(|id| {
+                let p = &s.display.surfaces[&id];
+                p.w == dw && p.h == dh
+            })
+        }) else {
+            continue;
+        };
+        let sid = s.surface_of_obj(sobj_l).unwrap();
+        if s.display.surfaces[&sid].fmt != dfmt {
+            return Ok(ApiRet::Ret(super::ddraw::DDERR_INVALIDPIXELFORMAT));
+        }
+        let scale = 1i32 << k;
+        let sr = match srect {
+            Some(r) => Rect::new(r.left / scale, r.top / scale, (r.right / scale).max(r.left / scale + 1), (r.bottom / scale).max(r.top / scale + 1)),
+            None => Rect::new(0, 0, dw as i32, dh as i32),
+        };
+        let dr = Rect::new(px / scale, py / scale, px / scale + sr.w(), py / scale + sr.h());
+        super::ddraw::copy_rect(s, did, dr, sid, sr)?;
+        if srect.is_some() && ppoint != 0 && k > 0 && prect != 0 {
+            // Partial loads apply to the top level only.
+            break;
+        }
+    }
+    Ok(ApiRet::Ret(D3D_OK))
+}
+
 fn dev_preload(_s: &mut Session) -> ApiResult {
     Ok(ApiRet::Ret(D3D_OK))
 }
@@ -2089,7 +2133,7 @@ pub static IDIRECT3DDEVICE7: IfaceDef = IfaceDef {
         export!("CaptureStateBlock", 2, dev_capture_state_block),
         export!("DeleteStateBlock", 2, dev_delete_state_block),
         export!("CreateStateBlock", 3, dev_create_state_block),
-        unimpl_method!("Load", 6),
+        export!("Load", 6, dev_load),
         export!("LightEnable", 3, dev_light_enable),
         export!("GetLightEnable", 3, dev_get_light_enable),
         unimpl_method!("SetClipPlane", 3),
