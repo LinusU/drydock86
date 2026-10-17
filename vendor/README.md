@@ -1,0 +1,42 @@
+# Vendored dependencies
+
+## unicorn-engine-sys 2.1.5
+
+`unicorn-engine-sys/` is the `unicorn-engine-sys` 2.1.5 crate as published on
+crates.io (Unicorn 2.1.x C sources, including the QEMU-derived TCG code), licensed
+GPL-2.0 (see `unicorn-engine-sys/COPYING` and the notices in its sources). It is used
+through `[patch.crates-io]` in the workspace `Cargo.toml`, so the version stays pinned
+at 2.1.5 while carrying the modifications listed below. Nothing else in the crate has
+been changed.
+
+### Modifications
+
+`patches/` holds each change as a unified diff against the published crate.
+
+**0001: store fast path for non-executable memory** (2026-10-17,
+`qemu/accel/tcg/cputlb.c`)
+
+Unicorn stubs out QEMU's dirty-memory tracking: `cpu_physical_memory_is_clean()`
+always returns true, so every TLB entry for a writable RAM page gets `TLB_NOTDIRTY`
+and its stores take the slow path (`store_helper` → `notdirty_write`, with region
+lookups). `notdirty_write` only clears the flag for TLB entries without execute
+permission, but x86 without paging marks every TLB entry executable, so for 32-bit
+x86 guests every store to any page stayed on the slow path permanently.
+
+The patch decides with Unicorn's own region permissions instead: `TLB_NOTDIRTY` is
+set only for regions mapped `UC_PROT_EXEC`, and `notdirty_write` clears it for regions
+that are not. Translated code can only come from executable regions, so stores to
+other memory need no code invalidation; stores to executable regions keep the
+original behaviour, so self-modifying code is still detected. Drydock maps only
+`PAGE_EXECUTE*` pages executable up front and grants execute permission to other
+readable pages on their first instruction fetch (changing the mapping flushes the
+TLB), which keeps this sound.
+
+Effect on the Midtown Madness 2 race benchmark (`local/bench.sh`, 8.86 s of driving
+from a checkpoint, Apple M5 Max): 0.53× → 0.96× realtime, with an identical guest
+instruction count and bit-identical frames. All tests, including the self-modifying
+code and translated-code invalidation tests, pass unchanged.
+
+To update Unicorn: replace `unicorn-engine-sys/` with the new published crate, apply
+the patches in order (`patch -p1 -d vendor < vendor/patches/0001-…`), and re-run the
+tests.

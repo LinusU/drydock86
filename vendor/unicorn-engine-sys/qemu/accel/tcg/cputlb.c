@@ -874,7 +874,10 @@ void tlb_set_page_with_attrs(CPUState *cpu, target_ulong vaddr,
         if (prot & PAGE_WRITE) {
             if (section->readonly) {
                 write_address |= TLB_DISCARD_WRITE;
-            } else if (cpu_physical_memory_is_clean(iotlb)) {
+            } else if ((section->mr->perms & UC_PROT_EXEC) && cpu_physical_memory_is_clean(iotlb)) {
+                /* Drydock: only regions mapped executable can hold translated
+                 * code, so only their stores need the code-invalidation slow
+                 * path. (Without paging, every x86 TLB entry is executable.) */
                 write_address |= TLB_NOTDIRTY;
             }
         }
@@ -1209,7 +1212,7 @@ static void notdirty_write(CPUState *cpu, vaddr mem_vaddr, unsigned size,
     // - or doing snapshot
     // , then never clean the tlb
     if (!(!mr || (tlbe->addr_write != -1 && mr->priority < cpu->uc->snapshot_level)) &&
-            !(tlbe->addr_code != -1) &&
+            !(mr->perms & UC_PROT_EXEC) &&
             !uc_mem_hook_installed(cpu->uc, tlbe->paddr | (mem_vaddr & ~TARGET_PAGE_MASK))) {
         tlb_set_dirty(cpu, mem_vaddr);
     }
