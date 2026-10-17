@@ -199,7 +199,10 @@ unsafe extern "C" fn block_cb(uc: *mut unicorn_engine::uc_engine, address: u64, 
         if t.len() >= st.trace_cap {
             t.pop_front();
         }
-        t.push_back(TraceEntry { eip: addr, insns: st.insns });
+        t.push_back(TraceEntry {
+            eip: addr,
+            insns: st.insns,
+        });
     }
 }
 
@@ -237,7 +240,6 @@ impl Cpu {
         };
         let mut uc = Unicorn::new_with_data(Arch::X86, Mode::MODE_32, hs).map_err(uc_err)?;
         uc.ctl_set_cpu_model(X86CpuModel::PENTIUM3 as i32).map_err(uc_err)?;
-
 
         uc.add_intr_hook(|uc, intno| {
             let eip = uc.reg_read(R::EIP).unwrap_or(0) as u32;
