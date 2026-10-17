@@ -5,6 +5,7 @@ mod inspect;
 mod launch;
 mod player;
 mod scenario;
+mod serve;
 
 use anyhow::Result;
 use clap::{Parser, Subcommand};
@@ -28,6 +29,12 @@ enum Cmd {
     },
     /// Launch a program.
     Run(launch::RunArgs),
+    /// Serve the JSON control protocol.
+    Serve {
+        /// Exchange line-delimited JSON over stdin/stdout.
+        #[arg(long)]
+        stdio: bool,
+    },
 }
 
 fn main() -> Result<()> {
@@ -37,6 +44,12 @@ fn main() -> Result<()> {
     let cli = Cli::parse();
     match cli.cmd {
         Cmd::Inspect { exe, json } => inspect::run(&exe, json),
+        Cmd::Serve { stdio } => {
+            if !stdio {
+                anyhow::bail!("only --stdio is supported");
+            }
+            serve::serve_stdio()
+        }
         Cmd::Run(a) => match a.mode {
             launch::Mode::Play => player::run(a),
             launch::Mode::Headless => launch::run(a),

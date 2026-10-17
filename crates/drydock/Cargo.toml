@@ -26,3 +26,7 @@ winit = "0.30"
 wgpu.workspace = true
 pollster = "1.0"
 bytemuck = "1.25"
+
+[dev-dependencies]
+drydock-fixtures.workspace = true
+iced-x86 = { workspace = true, features = ["code_asm"] }
