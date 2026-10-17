@@ -172,16 +172,59 @@ impl Session {
             }
             (sf.w, sf.h, out)
         };
-        // Gamma ramp of the primary surface (identity unless the guest set one).
-        let g = &self.com.ddraw.gamma;
-        for p in px.chunks_exact_mut(4) {
-            if g.len() == 768 {
-                p[0] = (g[p[0] as usize] >> 8) as u8;
-                p[1] = (g[256 + p[1] as usize] >> 8) as u8;
-                p[2] = (g[512 + p[2] as usize] >> 8) as u8;
-            }
-            p[3] = 255;
-        }
+        apply_gamma(&mut px, &self.com.ddraw.gamma);
         Some((w, h, px))
+    }
+
+    /// Like [`Session::present_rgba`], but a GPU-resident image is read back
+    /// asynchronously so the caller does not wait for the GPU.
+    pub fn present_begin(&mut self) -> Option<PresentJob> {
+        let id = self.front_surface();
+        let sf = self.display.surfaces.get(&id)?;
+        if sf.gpu_dirty {
+            let gamma = self.com.ddraw.gamma.clone();
+            let r = self.host.renderer.as_mut()?;
+            return Some(PresentJob::Gpu(r.readback_async(id)?, gamma));
+        }
+        let (w, h, px) = self.present_rgba()?;
+        Some(PresentJob::Ready(w, h, px))
+    }
+
+    /// Let asynchronous readbacks make progress.
+    pub fn present_poll(&self) {
+        if let Some(r) = self.host.renderer.as_ref() {
+            r.poll();
+        }
+    }
+}
+
+/// A presentation image being produced (see [`Session::present_begin`]).
+pub enum PresentJob {
+    Ready(u32, u32, Vec<u8>),
+    Gpu(drydock_gfx::PendingReadback, Vec<u16>),
+}
+
+impl PresentJob {
+    pub fn try_finish(&mut self) -> Option<(u32, u32, Vec<u8>)> {
+        match self {
+            PresentJob::Ready(w, h, px) => Some((*w, *h, std::mem::take(px))),
+            PresentJob::Gpu(r, gamma) => {
+                let (w, h, mut px) = r.try_take()?;
+                apply_gamma(&mut px, gamma);
+                Some((w, h, px))
+            }
+        }
+    }
+}
+
+/// Gamma ramp of the primary surface (identity unless the guest set one).
+fn apply_gamma(px: &mut [u8], g: &[u16]) {
+    for p in px.chunks_exact_mut(4) {
+        if g.len() == 768 {
+            p[0] = (g[p[0] as usize] >> 8) as u8;
+            p[1] = (g[256 + p[1] as usize] >> 8) as u8;
+            p[2] = (g[512 + p[2] as usize] >> 8) as u8;
+        }
+        p[3] = 255;
     }
 }
