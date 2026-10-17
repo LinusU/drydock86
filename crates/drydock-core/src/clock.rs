@@ -30,6 +30,25 @@ impl Default for CpuProfile {
     }
 }
 
+impl CpuProfile {
+    /// A generic x86 profile: `mhz` sets the time-stamp counter rate, `mips` the
+    /// sustained instruction rate (one instruction per cycle when equal).
+    pub fn with_rates(mhz: u32, mips: u32) -> CpuProfile {
+        let mips = mips.max(1) as u64;
+        let g = gcd(1000, mips);
+        CpuProfile {
+            name: format!("x86-{mhz}mhz-{mips}mips"),
+            ns_per_insn_num: 1000 / g,
+            ns_per_insn_den: mips / g,
+            tsc_hz: mhz as u64 * 1_000_000,
+        }
+    }
+}
+
+fn gcd(a: u64, b: u64) -> u64 {
+    if b == 0 { a } else { gcd(b, a % b) }
+}
+
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct VirtualClock {
     now_ns: u64,

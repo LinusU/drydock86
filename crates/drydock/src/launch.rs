@@ -78,6 +78,12 @@ pub struct RunArgs {
     /// Start from a checkpoint file instead of process start (same executable required).
     #[arg(long)]
     pub restore: Option<PathBuf>,
+    /// Guest CPU clock in MHz (time-stamp counter rate).
+    #[arg(long, default_value_t = 800)]
+    pub cpu_mhz: u32,
+    /// Guest instruction rate in millions per second (defaults to --cpu-mhz).
+    #[arg(long)]
+    pub cpu_mips: Option<u32>,
     /// Replay a recorded input timeline (a timeline file, or a run's provenance.json).
     #[arg(long)]
     pub replay_input: Option<PathBuf>,
@@ -129,7 +135,11 @@ pub fn build_session(a: &RunArgs) -> Result<Session> {
         args: a.args.clone(),
         cwd: None,
         windows: WindowsProfile::default(),
-        cpu: Default::default(),
+        cpu: if a.cpu_mhz == 800 && a.cpu_mips.is_none_or(|m| m == 800) {
+            Default::default()
+        } else {
+            drydock_core::clock::CpuProfile::with_rates(a.cpu_mhz, a.cpu_mips.unwrap_or(a.cpu_mhz))
+        },
         env: Vec::new(),
     };
     let mut s = Session::new(config, vfs, registry).map_err(anyhow::Error::msg)?;
