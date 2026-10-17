@@ -221,6 +221,9 @@ pub struct RunStats {
     pub stop_fault: u64,
     pub budget_by_horizon: u64,
     pub thread_switches: u64,
+    /// Virtual time skipped while every guest thread was blocked.
+    #[serde(default)]
+    pub idle_ns: u64,
 }
 
 impl Session {
@@ -408,7 +411,9 @@ impl Session {
                 }
                 match next {
                     Some(t) if limit.jump_idle => {
-                        self.clock.advance_to(t.min(limit.until_ns));
+                        let to = t.min(limit.until_ns);
+                        self.stats.idle_ns += to.saturating_sub(self.clock.now_ns());
+                        self.clock.advance_to(to);
                         continue;
                     }
                     _ => {

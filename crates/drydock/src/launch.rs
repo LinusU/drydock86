@@ -279,6 +279,7 @@ pub fn report(d: &crate::driver::Driver, stop: &RunStop) -> serde_json::Value {
         "virtual_s": virt,
         "wall_s": wall,
         "speed": if wall > 0.0 { virt / wall } else { 0.0 },
+        "pacing": d.stats,
         "host_cpu_s": host_cpu_seconds(),
         "insns": s.cpu.state().insns,
         "mips": s.cpu.state().insns as f64 / wall.max(1e-9) / 1e6,

@@ -19,6 +19,18 @@ pub struct Driver {
     /// Host wall time spent inside `advance` (for performance reports).
     pub busy: Duration,
     pub wall_start: Instant,
+    pub stats: PacingStats,
+}
+
+/// How realtime pacing went (all host-side; guest time is unaffected).
+#[derive(Debug, Clone, Copy, Default, serde::Serialize)]
+pub struct PacingStats {
+    /// Times virtual time fell more than the allowed lag behind and was re-anchored.
+    pub reanchors: u64,
+    /// Total lag dropped by re-anchoring, in host nanoseconds (time not caught up).
+    pub dropped_ns: u64,
+    /// Host time spent sleeping because virtual time was ahead.
+    pub slept_ns: u64,
 }
 
 /// Maximum amount realtime pacing lets virtual time lag behind before re-anchoring
@@ -35,6 +47,7 @@ impl Driver {
             anchor_virt: v,
             busy: Duration::ZERO,
             wall_start: Instant::now(),
+            stats: PacingStats::default(),
         }
     }
 
@@ -68,11 +81,15 @@ impl Driver {
                 Pacing::Realtime => {
                     let w = self.wall_virt();
                     if w > now + MAX_LAG_NS {
+                        self.stats.reanchors += 1;
+                        self.stats.dropped_ns += w - now;
                         self.reanchor();
                     }
                     let w = self.wall_virt();
                     if w <= now {
+                        let t = Instant::now();
                         std::thread::sleep(Duration::from_nanos((now - w).min(2_000_000)));
+                        self.stats.slept_ns += t.elapsed().as_nanos() as u64;
                         continue;
                     }
                     w.min(target)
@@ -88,14 +105,19 @@ impl Driver {
                     // event (or the target if nothing is scheduled).
                     let next = next_event.unwrap_or(u64::MAX).min(target);
                     match self.pacing {
-                        Pacing::Unthrottled => self.s.clock.advance_to(next),
+                        Pacing::Unthrottled => {
+                            self.s.stats.idle_ns += next.saturating_sub(self.s.clock.now_ns());
+                            self.s.clock.advance_to(next)
+                        }
                         Pacing::Realtime => {
                             let w = self.wall_virt();
                             if next > w {
                                 std::thread::sleep(Duration::from_nanos((next - w).min(5_000_000)));
                             }
                             let w = self.wall_virt();
-                            self.s.clock.advance_to(next.min(w));
+                            let to = next.min(w);
+                            self.s.stats.idle_ns += to.saturating_sub(self.s.clock.now_ns());
+                            self.s.clock.advance_to(to);
                         }
                     }
                 }
