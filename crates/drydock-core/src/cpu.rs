@@ -73,20 +73,6 @@ pub struct TraceEntry {
     pub insns: u64,
 }
 
-/// Instruction count of a translated block (`size == 0` marks an empty slot).
-#[derive(Clone, Copy, Default)]
-struct BlockEntry {
-    addr: u32,
-    size: u32,
-    insns: u32,
-}
-
-const BCACHE_BITS: u32 = 17;
-
-fn bcache_index(addr: u32) -> usize {
-    ((addr ^ (addr >> BCACHE_BITS)) & ((1 << BCACHE_BITS) - 1)) as usize
-}
-
 /// State touched from inside Unicorn hooks.
 pub struct HookState {
     pub stop: Option<Stop>,
@@ -94,8 +80,6 @@ pub struct HookState {
     pub insns: u64,
     /// Stop at the first block boundary where `insns >= insn_limit`.
     pub insn_limit: u64,
-    /// Direct-mapped cache of instruction counts per translated block.
-    bcache: Vec<BlockEntry>,
     /// Bitset of 4 KiB pages that have held translated code since the last full flush.
     /// Writes elsewhere need no translation-cache invalidation.
     code_pages: Vec<u64>,
@@ -198,21 +182,17 @@ unsafe extern "C" fn block_cb(uc: *mut unicorn_engine::uc_engine, address: u64, 
         return;
     }
     let addr = address as u32;
-    let slot = bcache_index(addr);
-    let e = st.bcache[slot];
-    let n = if e.addr == addr && e.size == size && size != 0 {
-        e.insns
-    } else {
-        let mut buf = vec![0u8; size as usize];
-        let ok = unsafe { unicorn_engine::uc_mem_read(uc, address, buf.as_mut_ptr() as *mut c_void, size as u64) };
-        let n = if ok == uc_error::OK { count_insns(&buf, addr) } else { 1 };
-        st.bcache[slot] = BlockEntry { addr, size, insns: n };
-        let last = addr.saturating_add(size.max(1) - 1);
-        for page in (addr >> 12)..=(last >> 12) {
-            st.code_pages[page as usize >> 6] |= 1 << (page & 63);
+    // The vendored Unicorn passes the block's instruction count in the upper half of
+    // `size` (vendor/patches/0003).
+    let n = size >> 16;
+    let bytes = size & 0xffff;
+    let last = addr.saturating_add(bytes.max(1) - 1);
+    for page in (addr >> 12)..=(last >> 12) {
+        let (w, b) = (page as usize >> 6, 1u64 << (page & 63));
+        if st.code_pages[w] & b == 0 {
+            st.code_pages[w] |= b;
         }
-        n
-    };
+    }
     st.insns += n as u64;
     st.blocks += 1;
     if let Some(t) = st.trace.as_mut() {
@@ -235,24 +215,12 @@ unsafe extern "C" fn rdtsc_cb(uc: *mut unicorn_engine::uc_engine, user: *mut c_v
     1
 }
 
-fn count_insns(bytes: &[u8], ip: u32) -> u32 {
-    let mut dec = iced_x86::Decoder::with_ip(32, bytes, ip as u64, iced_x86::DecoderOptions::NONE);
-    let mut n = 0;
-    let mut ins = iced_x86::Instruction::default();
-    while dec.can_decode() {
-        dec.decode_out(&mut ins);
-        n += 1;
-    }
-    n.max(1)
-}
-
 impl Cpu {
     pub fn new() -> Result<Cpu, String> {
         let hs = HookState {
             stop: None,
             insns: 0,
             insn_limit: u64::MAX,
-            bcache: vec![BlockEntry::default(); 1 << BCACHE_BITS],
             code_pages: vec![0; 1 << 14],
             breakpoints: FxHashMap::default(),
             skip_breakpoint: None,
@@ -465,13 +433,6 @@ impl Cpu {
             let end = (a as u64 + l as u64).min(u32::MAX as u64);
             self.uc.get_data_mut().invalidations += 1;
             self.uc.ctl_remove_cache(a as u64, end).map_err(uc_err)?;
-            let st = self.uc.get_data_mut();
-            // Drop cached instruction counts for blocks starting in the range.
-            for e in st.bcache.iter_mut() {
-                if l == u32::MAX || (e.addr as u64 >= a as u64 && (e.addr as u64) < end) {
-                    *e = BlockEntry::default();
-                }
-            }
         }
         Ok(())
     }
@@ -816,8 +777,6 @@ impl Cpu {
 
     /// Flush every translated block (after restoring memory from a checkpoint).
     pub fn flush_all_code(&mut self) -> Result<(), String> {
-        self.uc.ctl_flush_tb().map_err(uc_err)?;
-        self.uc.get_data_mut().bcache.fill(BlockEntry::default());
-        Ok(())
+        self.uc.ctl_flush_tb().map_err(uc_err)
     }
 }
