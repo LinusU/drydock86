@@ -274,29 +274,10 @@ impl Cpu {
         })
         .map_err(uc_err)?;
 
-        uc.add_mem_hook(HookType::MEM_INVALID, 1, 0, |uc, ty, addr, size, _v| {
-            let eip = uc.reg_read(R::EIP).unwrap_or(0) as u32;
-            let kind = match ty {
-                MemType::READ_UNMAPPED => FaultKind::ReadUnmapped,
-                MemType::WRITE_UNMAPPED => FaultKind::WriteUnmapped,
-                MemType::FETCH_UNMAPPED => FaultKind::FetchUnmapped,
-                MemType::READ_PROT => FaultKind::ReadProt,
-                MemType::WRITE_PROT => FaultKind::WriteProt,
-                MemType::FETCH_PROT => FaultKind::FetchProt,
-                _ => FaultKind::ReadUnmapped,
-            };
-            let st = uc.get_data_mut();
-            if st.stop.is_none() {
-                st.stop = Some(Stop::Fault(Fault {
-                    kind,
-                    eip,
-                    addr: addr as u32,
-                    size: size as u32,
-                }));
-            }
-            false
-        })
-        .map_err(uc_err)?;
+        // No catch-all memory hook: any installed memory hook makes Unicorn send every
+        // store through its slow path. Faults surface as `emu_start` errors instead,
+        // with the faulting address reconstructed from the instruction (see
+        // `fault_from_error`).
 
         uc.add_insn_invalid_hook(|uc| {
             let eip = uc.reg_read(R::EIP).unwrap_or(0) as u32;
@@ -568,25 +549,100 @@ impl Cpu {
         }
         match res {
             Ok(()) => Ok(Stop::Requested),
-            Err(e) => {
-                let eip = self.eip();
-                Ok(Stop::Fault(Fault {
-                    kind: match e {
-                        uc_error::INSN_INVALID => FaultKind::InvalidInsn,
-                        uc_error::FETCH_UNMAPPED => FaultKind::FetchUnmapped,
-                        uc_error::FETCH_PROT => FaultKind::FetchProt,
-                        uc_error::READ_UNMAPPED => FaultKind::ReadUnmapped,
-                        uc_error::WRITE_UNMAPPED => FaultKind::WriteUnmapped,
-                        uc_error::READ_PROT => FaultKind::ReadProt,
-                        uc_error::WRITE_PROT => FaultKind::WriteProt,
-                        _ => FaultKind::Exception(u32::MAX),
-                    },
-                    eip,
-                    addr: eip,
-                    size: 0,
-                }))
+            Err(e) => Ok(Stop::Fault(self.fault_from_error(mem, e))),
+        }
+    }
+
+    /// Describe a fault Unicorn reported as an `emu_start` error. Unicorn stops with
+    /// EIP at the faulting instruction (its access suppressed); the faulting address
+    /// is recovered by decoding that instruction and evaluating its memory operands.
+    fn fault_from_error(&self, mem: &AddressSpace, e: uc_error) -> Fault {
+        let eip = self.eip();
+        let kind = match e {
+            uc_error::INSN_INVALID => FaultKind::InvalidInsn,
+            uc_error::FETCH_UNMAPPED => FaultKind::FetchUnmapped,
+            uc_error::FETCH_PROT => FaultKind::FetchProt,
+            uc_error::READ_UNMAPPED => FaultKind::ReadUnmapped,
+            uc_error::WRITE_UNMAPPED => FaultKind::WriteUnmapped,
+            uc_error::READ_PROT => FaultKind::ReadProt,
+            uc_error::WRITE_PROT => FaultKind::WriteProt,
+            _ => FaultKind::Exception(u32::MAX),
+        };
+        let next_page = (eip & !0xfff).wrapping_add(0x1000);
+        let (addr, size) = match kind {
+            // An instruction can straddle into a page that cannot be fetched.
+            FaultKind::FetchUnmapped => (if mem.region_at(eip).is_some() { next_page } else { eip }, 0),
+            FaultKind::FetchProt => (if mem.jit_executable(eip) { next_page } else { eip }, 0),
+            FaultKind::ReadUnmapped | FaultKind::ReadProt => self.access_fault(mem, eip, false).unwrap_or((eip, 0)),
+            FaultKind::WriteUnmapped | FaultKind::WriteProt => self.access_fault(mem, eip, true).unwrap_or((eip, 0)),
+            _ => (eip, 0),
+        };
+        Fault { kind, eip, addr, size }
+    }
+
+    /// First inaccessible address touched by the instruction at `eip` (and the size of
+    /// that access), for a read or write fault.
+    fn access_fault(&self, mem: &AddressSpace, eip: u32, write: bool) -> Option<(u32, u32)> {
+        use iced_x86::{InstructionInfoFactory, OpAccess, Register};
+        let mut bytes = [0u8; 15];
+        let mut n = 0;
+        while n < bytes.len() {
+            match mem.read_u8(eip.wrapping_add(n as u32)) {
+                Ok(b) => bytes[n] = b,
+                Err(_) => break,
+            }
+            n += 1;
+        }
+        let ins = iced_x86::Decoder::with_ip(32, &bytes[..n], eip as u64, iced_x86::DecoderOptions::NONE).decode();
+        if ins.is_invalid() {
+            return None;
+        }
+        let mut factory = InstructionInfoFactory::new();
+        let info = factory.info(&ins);
+        let value = |r: Register| -> Option<u64> {
+            let ur = match r {
+                Register::ES | Register::CS | Register::SS | Register::DS | Register::GS => return Some(0),
+                Register::FS => return Some(self.fs_base as u64),
+                Register::EAX => R::EAX,
+                Register::ECX => R::ECX,
+                Register::EDX => R::EDX,
+                Register::EBX => R::EBX,
+                Register::ESP => R::ESP,
+                Register::EBP => R::EBP,
+                Register::ESI => R::ESI,
+                Register::EDI => R::EDI,
+                Register::AX => R::AX,
+                Register::CX => R::CX,
+                Register::DX => R::DX,
+                Register::BX => R::BX,
+                Register::SP => R::SP,
+                Register::BP => R::BP,
+                Register::SI => R::SI,
+                Register::DI => R::DI,
+                Register::AL => R::AL,
+                _ => return Option::None,
+            };
+            Some(self.uc.reg_read(ur).ok()?)
+        };
+        for m in info.used_memory() {
+            let is_write = matches!(m.access(), OpAccess::Write | OpAccess::CondWrite | OpAccess::ReadWrite | OpAccess::ReadCondWrite);
+            let is_read = matches!(m.access(), OpAccess::Read | OpAccess::CondRead | OpAccess::ReadWrite | OpAccess::ReadCondWrite);
+            if !(if write { is_write } else { is_read }) {
+                continue;
+            }
+            let Some(va) = m.virtual_address(0, |r, _, _| value(r)) else { continue };
+            let va = va as u32;
+            let size = (m.memory_size().size() as u32).max(1);
+            let ok = |a: u32| if write { mem.is_writable(a, 1) } else { mem.is_readable(a, 1) };
+            if !ok(va) {
+                return Some((va, size));
+            }
+            let next = (va & !0xfff).wrapping_add(0x1000);
+            if (next as u64) < va as u64 + size as u64 && !ok(next) {
+                return Some((next, size));
             }
         }
+        None
     }
 
     pub fn add_breakpoint(&mut self, addr: u32) -> Result<(), String> {

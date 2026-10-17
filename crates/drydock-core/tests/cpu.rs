@@ -134,7 +134,46 @@ fn write_to_readonly_page_faults() {
     let mut m = machine(&code);
     m.mem.protect(0x40_8000, 0x1000, PAGE_READONLY).unwrap();
     match m.run() {
-        Stop::Fault(f) => assert_eq!(f.kind, FaultKind::WriteProt),
+        Stop::Fault(f) => {
+            assert_eq!(f.kind, FaultKind::WriteProt);
+            assert_eq!(f.addr, 0x40_8000);
+            assert_eq!(f.eip, CODE);
+        }
+        s => panic!("{s:?}"),
+    }
+}
+
+#[test]
+fn fault_address_of_access_straddling_into_unmapped_page() {
+    // The code region ends at 0x41_0000; the dword read covers 0x40_fffe..0x41_0002.
+    let code = asm(|a| {
+        a.mov(eax, dword_ptr(0x40_fffe)).unwrap();
+    });
+    let mut m = machine(&code);
+    match m.run() {
+        Stop::Fault(f) => {
+            assert_eq!(f.kind, FaultKind::ReadUnmapped);
+            assert_eq!(f.addr, 0x41_0000);
+        }
+        s => panic!("{s:?}"),
+    }
+}
+
+#[test]
+fn fault_address_of_string_store() {
+    let code = asm(|a| {
+        a.mov(edi, 0x40_8010).unwrap();
+        a.mov(ecx, 4).unwrap();
+        a.rep().stosd().unwrap();
+    });
+    let mut m = machine(&code);
+    m.mem.protect(0x40_8000, 0x1000, PAGE_READONLY).unwrap();
+    match m.run() {
+        Stop::Fault(f) => {
+            assert_eq!(f.kind, FaultKind::WriteProt);
+            assert_eq!(f.addr, 0x40_8010);
+            assert_eq!(m.cpu.reg(Reg::ECX), 4, "no iteration completed");
+        }
         s => panic!("{s:?}"),
     }
 }
