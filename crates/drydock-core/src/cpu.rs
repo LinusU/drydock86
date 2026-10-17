@@ -219,6 +219,8 @@ impl Cpu {
         uc.ctl_set_cpu_model(X86CpuModel::PENTIUM3 as i32).map_err(uc_err)?;
 
         uc.add_block_hook(1, 0, |uc, addr, size| {
+            // Unicorn checks for a stop request right after this hook, so a block
+            // that would exceed the budget is not entered and not counted.
             let st = uc.get_data_mut();
             if st.insns >= st.insn_limit {
                 if st.stop.is_none() {
@@ -716,7 +718,8 @@ impl Cpu {
         if read {
             ty |= HookType::MEM_READ;
         }
-        self.uc
+        let id = self
+            .uc
             .add_mem_hook(
                 ty,
                 addr as u64,
@@ -736,11 +739,16 @@ impl Cpu {
                     true
                 },
             )
-            .map_err(uc_err)
+            .map_err(uc_err)?;
+        // Code translated without memory hooks lacks the per-access stop check that
+        // makes the watchpoint stop right after the access; retranslate.
+        self.flush_all_code()?;
+        Ok(id)
     }
 
     pub fn remove_hook(&mut self, id: unicorn_engine::UcHookId) -> Result<(), String> {
-        self.uc.remove_hook(id).map_err(uc_err)
+        self.uc.remove_hook(id).map_err(uc_err)?;
+        self.flush_all_code()
     }
 
     /// Enable/disable the bounded block trace.

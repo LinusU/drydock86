@@ -328,3 +328,38 @@ fn rep_string_instructions_count_per_iteration() {
     let n = m.cpu.state().insns;
     assert_eq!(n, 3 + 101 + 1, "insns={n}");
 }
+
+#[test]
+fn write_watchpoint_stops_right_after_the_store() {
+    // The store's block is translated and run once before the watchpoint exists.
+    // Both passes enter the same block at `top`, so the second runs cached code.
+    let mut a = CodeAssembler::new(32).unwrap();
+    let mut top = a.create_label();
+    let mut init = a.create_label();
+    a.jmp(init).unwrap();
+    a.set_label(&mut top).unwrap();
+    a.mov(dword_ptr(STACK - 0x100), eax).unwrap();
+    a.mov(ebx, ecx).unwrap();
+    a.int(0x2e).unwrap();
+    a.dec(ecx).unwrap();
+    a.jnz(top).unwrap();
+    a.int(0x2e).unwrap();
+    a.set_label(&mut init).unwrap();
+    a.mov(eax, 7).unwrap();
+    a.mov(ecx, 2).unwrap();
+    a.jmp(top).unwrap();
+    let code = a.assemble(CODE as u64).unwrap();
+    let mut m = machine(&code);
+    assert!(matches!(m.run(), Stop::ApiTrap { .. }));
+    assert_eq!(m.cpu.reg(Reg::EBX), 2);
+    m.cpu.add_watchpoint(STACK - 0x100, 4, true, false).unwrap();
+    match m.run() {
+        Stop::Watchpoint { addr, write, .. } => {
+            assert_eq!(addr, STACK - 0x100);
+            assert!(write);
+            assert_eq!(m.cpu.reg(Reg::ECX), 1);
+            assert_eq!(m.cpu.reg(Reg::EBX), 2, "the instruction after the store did not run");
+        }
+        s => panic!("{s:?}"),
+    }
+}
