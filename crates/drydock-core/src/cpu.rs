@@ -74,6 +74,9 @@ pub struct HookState {
     /// Stop at the first block boundary where `insns >= insn_limit`.
     pub insn_limit: u64,
     icache: FxHashMap<u32, (u32, u32)>,
+    /// Bitset of 4 KiB pages that have held translated code since the last full flush.
+    /// Writes elsewhere need no translation-cache invalidation.
+    code_pages: Vec<u64>,
     pub breakpoints: FxHashMap<u32, unicorn_engine::UcHookId>,
     pub skip_breakpoint: Option<u32>,
     /// Virtual time (ns) corresponding to `tsc_insn_base`.
@@ -90,6 +93,12 @@ pub struct HookState {
 }
 
 impl HookState {
+    /// Whether any page of `[addr, addr + len)` has held translated code.
+    fn has_code(&self, addr: u32, len: u32) -> bool {
+        let last = (addr as u64 + len as u64 - 1).min(u32::MAX as u64) as u32;
+        ((addr >> 12)..=(last >> 12)).any(|p| self.code_pages[p as usize >> 6] & (1 << (p & 63)) != 0)
+    }
+
     /// Virtual time "now" as seen from inside a slice (for RDTSC).
     pub fn now_ns(&self) -> u64 {
         let d = self.insns - self.tsc_insn_base;
@@ -184,6 +193,7 @@ impl Cpu {
             breakpoints: FxHashMap::default(),
             skip_breakpoint: None,
             tsc_time_base_ns: 0,
+            code_pages: vec![0; 1 << 14],
             tsc_insn_base: 0,
             ns_per_insn_num: 1,
             ns_per_insn_den: 1,
@@ -215,7 +225,12 @@ impl Cpu {
                     } else {
                         1
                     };
-                    uc.get_data_mut().icache.insert(addr, (size, n));
+                    let st = uc.get_data_mut();
+                    st.icache.insert(addr, (size, n));
+                    let last = addr.saturating_add(size.max(1) - 1);
+                    for page in (addr >> 12)..=(last >> 12) {
+                        st.code_pages[page as usize >> 6] |= 1 << (page & 63);
+                    }
                     n
                 }
             };
@@ -416,6 +431,9 @@ impl Cpu {
             let end = (a as u64 + l as u64).min(u32::MAX as u64);
             self.uc.ctl_remove_cache(a as u64, end).map_err(uc_err)?;
             let st = self.uc.get_data_mut();
+            if l != u32::MAX && !self.uc.get_data().has_code(a, l) {
+                continue;
+            }
             if l == u32::MAX {
                 st.icache.clear();
             } else if !st.icache.is_empty() {
