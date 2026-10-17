@@ -166,6 +166,9 @@ _end_loop:
             tcg_op = QTAILQ_FIRST(&tcg_ctx->ops);
         }
 
-        tcg_op->args[1] = db->tb->size;
+        /* Drydock: the upper 16 bits carry the block's instruction count, so the
+         * hook does not have to decode the block to count it. Blocks are smaller
+         * than 64 KiB and hold at most TCG_MAX_INSNS instructions. */
+        tcg_op->args[1] = db->tb->size | ((uint32_t)db->tb->icount << 16);
     }
 }

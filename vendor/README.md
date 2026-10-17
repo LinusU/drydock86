@@ -53,6 +53,15 @@ does so when it adds or removes a watchpoint.
 Effect on the same benchmark: best of three 0.997× → 1.135× realtime, identical guest
 execution; the full drive scenario runs at 1.31× realtime.
 
+**0003: instruction count for block hooks** (2026-10-17,
+`qemu/accel/tcg/translator.c`)
+
+Block hooks receive the block's size in bytes. The patch puts the block's instruction
+count (known to the translator) in the upper 16 bits of that argument, so Drydock's
+instruction-counting hook no longer decodes blocks or keeps a cache of counts.
+Blocks are smaller than 64 KiB and hold at most 512 instructions, so both fit.
+Counts are identical to the previous decode-based ones on the acceptance workload.
+
 To update Unicorn: replace `unicorn-engine-sys/` with the new published crate, apply
 the patches in order (`patch -p1 -d vendor < vendor/patches/0001-…`), and re-run the
 tests.
