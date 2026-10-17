@@ -152,6 +152,12 @@ fn key_event(vk: u8, down: bool) -> InputEvent {
 }
 
 fn session_thread(args: RunArgs, rx: Receiver<ToSession>, tx: SyncSender<ToUi>, proxy: EventLoopProxy<()>) {
+    // The emulation thread must run on performance cores like the UI does; macOS
+    // otherwise schedules a spawned thread at a lower quality-of-service class.
+    #[cfg(target_os = "macos")]
+    unsafe {
+        libc::pthread_set_qos_class_self_np(libc::qos_class_t::QOS_CLASS_USER_INTERACTIVE, 0);
+    }
     let mut s = match crate::launch::build_session(&args) {
         Ok(s) => s,
         Err(e) => {

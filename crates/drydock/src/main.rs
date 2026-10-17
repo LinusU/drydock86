@@ -42,6 +42,11 @@ fn main() -> Result<()> {
         .target(env_logger::Target::Stderr)
         .init();
     let cli = Cli::parse();
+    // Emulation is latency-bound work on this thread; ask macOS for performance cores.
+    #[cfg(target_os = "macos")]
+    unsafe {
+        libc::pthread_set_qos_class_self_np(libc::qos_class_t::QOS_CLASS_USER_INTERACTIVE, 0);
+    }
     match cli.cmd {
         Cmd::Inspect { exe, json } => inspect::run(&exe, json),
         Cmd::Serve { stdio } => {
