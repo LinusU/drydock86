@@ -22,11 +22,12 @@ mutations.
 | --- | --- | --- |
 | Retail launch | The executable starts from the installation; EULA dialog (RichEdit text) appears and is accepted with ordinary input | `local/scenarios/eula.json` |
 | Menus and loading | Main menu, driver profiles, race and vehicle selection with 3D vehicle preview, loading screens, quit prompt | `local/scenarios/menu1.json`, `race1.json` |
+| Intro movie | `logos.avi` (Indeo 5, 320×240, 15 fps, 332 frames, 8-bit mono PCM) plays centred in its MCIWnd window before the splash screen: 332 frames presented over 22.13 s of virtual time, the sound track is in the WAV capture, and a mouse click stops it at the game's next poll (the game checks every 250 ms) | `intro.json`, `intro_skip.json`; screenshots `i1–i3`; `audio.wav` |
 | Interactive gameplay | Quick Race "Go Drive" in San Francisco: city, traffic, car model, HUD, radar map, sky; steering, acceleration and braking respond; the audio capture contains continuous engine and effect sound while driving (checked by level, not judged by ear) | `drive1.json`; screenshots `d0–d2`; `audio.wav` |
 | Additional gameplay path | Blitz race "Ignorance Is Blitz": briefing/loading, checkpoint counter and countdown, race ends with "Time's up!", Restart Race from the pause menu resets the race, Quit to Race Menu returns to the Races screen | `race1.json`, `race3.json` |
 | Persistence | A driver profile created in the game's dialog and saved on quit through the game's own Quit prompt is selected again after restarting Drydock with the same overlay | `persist2.json`, `persist3.json` |
 | Headless gameplay | All of the above ran headless (offscreen wgpu, no window, discard or WAV audio) | reports in `local/artifacts/*` |
-| Device equivalence | Replaying a recorded input timeline in the desktop player executes the same number of guest instructions and presents the same number of frames as the headless run (10,721,602,760 instructions, 1226 frames for `drive1`); frames differ only by RGB565 quantisation (≤ 7 per channel) because the player shows the GPU image directly | `play-eq*` |
+| Device equivalence | Replaying a recorded input timeline in the desktop player executes the same number of guest instructions and presents the same number of frames as the headless run (10,721,602,760 instructions, 1226 frames for `drive1`, measured before the intro movie played; with the movie the headless run is 10,721,797,621 instructions and 1558 frames); frames differ only by RGB565 quantisation (≤ 7 per channel) because the player shows the GPU image directly | `play-eq*` |
 | State restoration | A mid-race savepoint, a disk checkpoint restored in the same process, and the same checkpoint restored in a fresh process all produce bit-identical frames after the same 5 s input sequence | `ckpt1.json`, `ckpt_resume.json` |
 | Replay | Replaying `drive1`'s recorded input timeline without the scenario reproduces the instruction count, frame count and final frame exactly | `replay1` |
 | Agent usability | Protocol sessions against the game: bounded runs, cancel of a 600 s run after 2 s, screenshots, state, API breakpoints with memory and register inspection | `local/proto_smoke.py`, `local/proto_lock.py` |
@@ -78,6 +79,9 @@ cut would; use `--no-persist` for experiments.
   (distance attenuation, panning and Doppler are mixed; cone parameters are stored but not applied), software mixing to device, WAV or discard.
 - **winmm:** timeGetTime, timer resolution, multimedia timers with callbacks,
   joystick, MCI command dispatch (CD audio reports no device).
+- **msvfw32:** MCIWnd windows playing AVI files on the virtual clock (Indeo 5 video,
+  PCM audio): MCIWndCreate, play, pause, resume, stop, mode, length and position
+  queries.
 - **DirectMusic:** performance, ports, loader and composer objects with their
   queries and settings.
 
@@ -86,9 +90,10 @@ cut would; use `--no-persist` for experiments.
 Behaviour the acceptance workload reaches but Drydock does not implement. Each is
 reported at run time as a structured diagnostic, never as fake success.
 
-- **Video for Windows / Indeo 5:** `MSVFW32.DLL` is not provided, so
-  `LoadLibrary` fails and the game skips its intro movie `logos.avi` on its own.
-  Implementing MCIWnd/AVIFile and an Indeo 5 decoder is open.
+- **Video for Windows:** only MCIWnd with Indeo 5 video and PCM audio. Other codecs
+  and audio formats fail to open with a "missing" diagnostic; AVIFile, DrawDib and
+  the installable-compressor (IC*) APIs are not provided, nor are MCIWnd's play bar,
+  menu, notifications and seeking.
 - **DirectMusic playback:** creating segments (`CLSID_DirectMusicSegment`) is not
   implemented and no General MIDI DLS collection is available (`gm.dls` is a Windows
   system file); the game runs without music. CD audio is unavailable because no
@@ -147,6 +152,9 @@ The remaining large lever is the software TLB: stores across more than about 256
 pages run at a seventh of the speed of stores within a few pages
 (`bench_stores_across_pages`); a larger initial TLB did not help the game.
 
+Indeo 5 decoding of the 332-frame intro movie (320×240) takes about 85 ms in
+total on the host (`cargo run --release -p drydock-media --example avi_frames`).
+
 Micro-benchmarks (`cargo test --release -p drydock-core --test bench -- --ignored
 --nocapture`): tight integer loop ≈ 1350 MIPS, call/ret with stores ≈ 590 MIPS, API
 trap round trip ≈ 0.46 µs.
@@ -165,10 +173,12 @@ race frames differ between Lavapipe and the Apple GPU.
    Candidates: Unicorn's software-TLB behaviour on large working sets, the per-block
    stop-check helper, moving Direct3D translation and frame submission to a render
    thread.
-2. Video for Windows (AVIFile, MCIWnd) and an Indeo 5 decoder for the intro movie.
-3. DirectMusic segments and DLS synthesis; CD-ROM drive mapping for CD audio.
-4. CI has not run yet (the workflow is untested); Linux verification so far is a
+2. DirectMusic segments and DLS synthesis; CD-ROM drive mapping for CD audio.
+3. CI has not run yet (the workflow is untested); Linux verification so far is a
    local aarch64 container.
-5. Licence compatibility of Apache-2.0-only dependencies with GPL-2.0-only Unicorn
+4. Licence compatibility of Apache-2.0-only dependencies with GPL-2.0-only Unicorn
    for binary distribution (see THIRD_PARTY_NOTICES.md).
-6. Child processes.
+5. Child processes.
+6. The desktop player shows GDI drawing only when something presents (DirectDraw,
+   or a movie frame): a program that only draws with GDI is not redrawn in the
+   player window, although screenshots and headless runs see its output.

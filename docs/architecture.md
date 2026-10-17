@@ -13,8 +13,9 @@ the pieces fit and which invariants they keep.
 | `drydock-win32` | The session: loader, scheduler, kernel objects, system DLLs, COM, devices, diagnostics, checkpoints |
 | `drydock-gfx` | wgpu renderer: textures, fixed-function shader, draws, readback (headless capable) |
 | `drydock-audio` | Host audio sinks: device (cpal), WAV file, discard, tee |
+| `drydock-media` | AVI container parsing and the Indeo 5 video decoder (ported from FFmpeg) |
 | `drydock` | CLI, pacing driver, scenario runner, JSON protocol server, desktop player |
-| `drydock-fixtures` | Generates PE32 test programs from Rust source (tests only) |
+| `drydock-fixtures` | Generates PE32 test programs from Rust source, and Indeo 5 / AVI test media (tests only) |
 
 ## Session and state ownership
 
@@ -192,9 +193,27 @@ pan, frequency, 3D distance attenuation, panning and Doppler) at 44.1 kHz in 5 m
 virtual-time ticks and pushes the samples to the sink: the host device (cpal), a WAV
 file, or a discarding sink. The host queue never feeds back into guest time.
 
+The mixer timeline starts with the first sound source (DirectSound, or a movie's
+sound track) and then keeps running, so a WAV capture stays aligned with virtual
+time.
+
 DirectMusic provides the performance, port, loader and composer objects; segment
 playback and DLS synthesis are not implemented (see `status.md`). MCI answers CD
 audio requests with "device not ready" because no CD-ROM drive can be mapped yet.
+
+## Movies
+
+`MSVFW32.DLL` provides the MCIWnd window (`dll/msvfw32.rs`). Its window procedure
+opens the AVI file through the VFS, sizes the window to the movie and answers the MCI
+commands sent as messages. A playing movie's position is a function of virtual time,
+like a DirectSound buffer: the next frame time is a scheduler event, so playback
+continues while the guest thread sleeps between polls, as it does on Windows where an
+MCI thread plays the file. Due frames are decoded with `drydock-media`'s Indeo 5
+decoder and drawn into the window's client area on the scanned-out surface (clipped
+to its ancestors), followed by a presentation; the PCM sound track is rendered by the
+DirectSound mixer. Decoded pictures are a host-side cache: a checkpoint stores the
+playback position, and after a restore the decoder decodes from the first frame
+again, which yields the same pictures.
 
 ## Input
 
