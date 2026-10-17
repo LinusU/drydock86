@@ -239,6 +239,8 @@ pub struct AddressSpace {
     pub alloc_floor: u32,
     /// Exclusive upper bound for automatic placement (user-mode limit).
     pub alloc_ceiling: u32,
+    /// Pages mapped executable in the JIT on demand ([`AddressSpace::grant_exec`]).
+    exec_granted: std::collections::BTreeSet<u32>,
 }
 
 impl Default for AddressSpace {
@@ -259,6 +261,7 @@ impl AddressSpace {
             pending_invalidate: Vec::new(),
             alloc_floor: 0x0001_0000,
             alloc_ceiling: 0x7FFE_0000,
+            exec_granted: Default::default(),
         }
     }
 
@@ -351,7 +354,7 @@ impl AddressSpace {
         };
         let npages = (size / PAGE_SIZE) as usize;
         let host = HostBuf::new(size as usize);
-        self.pending_map.push(MapOp::Map {
+        self.queue_map(MapOp::Map {
             base,
             size,
             ptr: host.as_ptr() as usize,
@@ -398,7 +401,7 @@ impl AddressSpace {
             p.state = PageState::Committed;
             p.protect = protect;
         }
-        self.pending_map.push(MapOp::Protect {
+        self.queue_map(MapOp::Protect {
             base: start,
             size: (end - start as u64) as u32,
             protect,
@@ -428,7 +431,7 @@ impl AddressSpace {
         let off = (start - r.base) as usize;
         let len = (end - start as u64) as usize;
         r.host.as_mut_slice()[off..off + len].fill(0);
-        self.pending_map.push(MapOp::Protect {
+        self.queue_map(MapOp::Protect {
             base: start,
             size: len as u32,
             protect: PAGE_NOACCESS,
@@ -455,7 +458,7 @@ impl AddressSpace {
         for p in &mut r.pages[first..last] {
             p.protect = protect;
         }
-        self.pending_map.push(MapOp::Protect {
+        self.queue_map(MapOp::Protect {
             base: start,
             size: (end - start as u64) as u32,
             protect,
@@ -467,7 +470,7 @@ impl AddressSpace {
     /// Release an entire region.
     pub fn release(&mut self, base: u32) -> MemResult<()> {
         let r = self.regions.remove(&base).ok_or(MemError::Unmapped { addr: base })?;
-        self.pending_map.push(MapOp::Unmap {
+        self.queue_map(MapOp::Unmap {
             base: r.base,
             size: r.size,
         });
@@ -594,6 +597,31 @@ impl AddressSpace {
         self.pending_invalidate.push((addr, len));
     }
 
+    /// Queue a Unicorn mapping change. Protections are re-applied from the guest
+    /// protection, so on-demand execute grants in the range are forgotten.
+    fn queue_map(&mut self, op: MapOp) {
+        let range = match op {
+            MapOp::Map { base, size, .. } | MapOp::Unmap { base, size } | MapOp::Protect { base, size, .. } => {
+                base..base.saturating_add(size)
+            }
+        };
+        let gone: Vec<u32> = self.exec_granted.range(range).copied().collect();
+        for g in gone {
+            self.exec_granted.remove(&g);
+        }
+        self.pending_map.push(op);
+    }
+
+    /// Whether the page containing `addr` is currently mapped executable in the JIT.
+    pub fn jit_executable(&self, addr: u32) -> bool {
+        let page = addr & !(PAGE_SIZE - 1);
+        self.exec_granted.contains(&page)
+            || self.region_at(addr).is_some_and(|r| {
+                let p = r.pages[((addr - r.base) / PAGE_SIZE) as usize];
+                p.state == PageState::Committed && p.protect & 0xf0 != 0
+            })
+    }
+
     /// Map the page containing `addr` executable for the JIT after an instruction
     /// fetch faulted there. Returns false when the guest protection forbids
     /// execution (the fault is then genuine).
@@ -603,7 +631,12 @@ impl AddressSpace {
         };
         let i = ((addr - r.base) / PAGE_SIZE) as usize;
         let p = r.pages[i];
-        if p.state != PageState::Committed || !decode_protect(p.protect).exec || p.protect & 0xf0 != 0 {
+        let page = addr & !(PAGE_SIZE - 1);
+        if p.state != PageState::Committed
+            || !decode_protect(p.protect).exec
+            || p.protect & 0xf0 != 0
+            || !self.exec_granted.insert(page)
+        {
             return false;
         }
         self.pending_map.push(MapOp::Protect {
@@ -794,11 +827,9 @@ impl AddressSpace {
 
     /// Replace the entire address space with a snapshot. All Unicorn mappings are rebuilt.
     pub fn restore(&mut self, snap: &[RegionSnapshot]) {
-        for r in self.regions.values() {
-            self.pending_map.push(MapOp::Unmap {
-                base: r.base,
-                size: r.size,
-            });
+        let old: Vec<(u32, u32)> = self.regions.values().map(|r| (r.base, r.size)).collect();
+        for (base, size) in old {
+            self.queue_map(MapOp::Unmap { base, size });
         }
         self.regions.clear();
         for s in snap {
@@ -807,7 +838,7 @@ impl AddressSpace {
                 let off = *index as usize * PAGE_SIZE as usize;
                 host.as_mut_slice()[off..off + bytes.len()].copy_from_slice(bytes);
             }
-            self.pending_map.push(MapOp::Map {
+            self.queue_map(MapOp::Map {
                 base: s.base,
                 size: s.size,
                 ptr: host.as_ptr() as usize,
@@ -817,7 +848,7 @@ impl AddressSpace {
             while i < s.pages.len() {
                 let p = s.pages[i];
                 let n = s.pages[i..].iter().take_while(|q| **q == p).count();
-                self.pending_map.push(MapOp::Protect {
+                self.queue_map(MapOp::Protect {
                     base: s.base + i as u32 * PAGE_SIZE,
                     size: n as u32 * PAGE_SIZE,
                     protect: p.protect,
