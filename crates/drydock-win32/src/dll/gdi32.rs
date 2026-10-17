@@ -534,7 +534,7 @@ fn select_object(s: &mut Session) -> ApiResult {
 
 fn delete_object(s: &mut Session) -> ApiResult {
     let [h] = s.args::<1>()?;
-    if h >= STOCK_BASE && h < STOCK_BASE + 32 {
+    if (STOCK_BASE..STOCK_BASE + 32).contains(&h) {
         return Ok(ApiRet::Ret(1));
     }
     match s.gdi.objs.remove(&h) {

@@ -199,7 +199,7 @@ pub enum Disposition {
 
 enum Node {
     HostFile(PathBuf, u64),
-    HostDir(PathBuf),
+    HostDir,
     VirtualDir,
     OverlayFile(String),
     OverlayDir,
@@ -348,7 +348,7 @@ impl Vfs {
         }
         if let Some((h, is_dir)) = self.host_resolve(p) {
             if is_dir {
-                return Some(Node::HostDir(h));
+                return Some(Node::HostDir);
             }
             let len = std::fs::metadata(&h).map(|m| m.len()).unwrap_or(0);
             return Some(Node::HostFile(h, len));
@@ -360,15 +360,12 @@ impl Vfs {
     }
 
     pub fn exists_dir(&self, p: &GuestPath) -> bool {
-        matches!(
-            self.node(p),
-            Some(Node::HostDir(_) | Node::VirtualDir | Node::OverlayDir)
-        )
+        matches!(self.node(p), Some(Node::HostDir | Node::VirtualDir | Node::OverlayDir))
     }
 
     pub fn attributes(&self, p: &GuestPath) -> VfsResult<u32> {
         match self.node(p) {
-            Some(Node::HostDir(_) | Node::VirtualDir | Node::OverlayDir) => Ok(FILE_ATTRIBUTE_DIRECTORY),
+            Some(Node::HostDir | Node::VirtualDir | Node::OverlayDir) => Ok(FILE_ATTRIBUTE_DIRECTORY),
             Some(Node::HostFile(..)) => Ok(FILE_ATTRIBUTE_ARCHIVE),
             Some(Node::OverlayFile(k)) => match &self.overlay[&k] {
                 OverlayNode::File { attrs, .. } => Ok(*attrs),
@@ -424,7 +421,7 @@ impl Vfs {
         let parent_ok = p.parent().map(|par| self.exists_dir(&par)).unwrap_or(true);
         let node = self.node(p);
         let existed = node.is_some();
-        if matches!(node, Some(Node::HostDir(_) | Node::VirtualDir | Node::OverlayDir)) {
+        if matches!(node, Some(Node::HostDir | Node::VirtualDir | Node::OverlayDir)) {
             return Err(VfsError::IsDirectory);
         }
         match (disp, existed) {

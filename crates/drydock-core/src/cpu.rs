@@ -175,7 +175,7 @@ unsafe extern "C" fn rdtsc_cb(uc: *mut unicorn_engine::uc_engine, user: *mut c_v
     let st = unsafe { &*(user as *const HookState) };
     let tsc = (st.now_ns() as u128 * st.tsc_hz as u128 / 1_000_000_000u128) as u64;
     let lo = tsc as u32 as u64;
-    let hi = (tsc >> 32) as u64;
+    let hi = tsc >> 32;
     unsafe {
         unicorn_engine::uc_reg_write(uc, R::EAX as i32, (&raw const lo).cast());
         unicorn_engine::uc_reg_write(uc, R::EDX as i32, (&raw const hi).cast());
@@ -421,7 +421,7 @@ impl Cpu {
                 }
             }
         }
-        let inv: Vec<_> = mem.pending_invalidate.drain(..).collect();
+        let inv: Vec<_> = std::mem::take(&mut mem.pending_invalidate);
         for (a, l) in inv {
             if l == 0 {
                 continue;
@@ -630,18 +630,32 @@ impl Cpu {
                 Register::AL => R::AL,
                 _ => return Option::None,
             };
-            Some(self.uc.reg_read(ur).ok()?)
+            self.uc.reg_read(ur).ok()
         };
         for m in info.used_memory() {
-            let is_write = matches!(m.access(), OpAccess::Write | OpAccess::CondWrite | OpAccess::ReadWrite | OpAccess::ReadCondWrite);
-            let is_read = matches!(m.access(), OpAccess::Read | OpAccess::CondRead | OpAccess::ReadWrite | OpAccess::ReadCondWrite);
+            let is_write = matches!(
+                m.access(),
+                OpAccess::Write | OpAccess::CondWrite | OpAccess::ReadWrite | OpAccess::ReadCondWrite
+            );
+            let is_read = matches!(
+                m.access(),
+                OpAccess::Read | OpAccess::CondRead | OpAccess::ReadWrite | OpAccess::ReadCondWrite
+            );
             if !(if write { is_write } else { is_read }) {
                 continue;
             }
-            let Some(va) = m.virtual_address(0, |r, _, _| value(r)) else { continue };
+            let Some(va) = m.virtual_address(0, |r, _, _| value(r)) else {
+                continue;
+            };
             let va = va as u32;
             let size = (m.memory_size().size() as u32).max(1);
-            let ok = |a: u32| if write { mem.is_writable(a, 1) } else { mem.is_readable(a, 1) };
+            let ok = |a: u32| {
+                if write {
+                    mem.is_writable(a, 1)
+                } else {
+                    mem.is_readable(a, 1)
+                }
+            };
             if !ok(va) {
                 return Some((va, size));
             }

@@ -2020,7 +2020,12 @@ fn gamma_get_ramp(s: &mut Session) -> ApiResult {
 fn gamma_set_ramp(s: &mut Session) -> ApiResult {
     let [_this, _flags, p] = s.args::<3>()?;
     let b = s.mem.read_vec(p, 1536)?;
-    s.com.ddraw.gamma = b.chunks_exact(2).map(|c| u16::from_le_bytes([c[0], c[1]])).collect();
+    s.com.ddraw.gamma = b
+        .as_chunks::<2>()
+        .0
+        .iter()
+        .map(|c| u16::from_le_bytes([c[0], c[1]]))
+        .collect();
     present(s);
     Ok(ApiRet::Ret(DD_OK))
 }

@@ -240,7 +240,7 @@ impl PresentJob {
 
 /// Gamma ramp of the primary surface (identity unless the guest set one).
 fn apply_gamma(px: &mut [u8], g: &[u16]) {
-    for p in px.chunks_exact_mut(4) {
+    for p in px.as_chunks_mut::<4>().0 {
         if g.len() == 768 {
             p[0] = (g[p[0] as usize] >> 8) as u8;
             p[1] = (g[256 + p[1] as usize] >> 8) as u8;

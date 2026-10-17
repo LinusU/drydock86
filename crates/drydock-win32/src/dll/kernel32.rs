@@ -688,7 +688,7 @@ fn close_handle(s: &mut Session) -> ApiResult {
             Ok(ApiRet::Ret(1))
         }
         Ok(_) => Ok(ApiRet::Ret(1)),
-        Err(()) => {
+        Err(crate::objects::InvalidHandle) => {
             if s.registry.close(h) {
                 return Ok(ApiRet::Ret(1));
             }

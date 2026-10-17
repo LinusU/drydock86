@@ -154,7 +154,15 @@ fn bench_call_ret_and_stores() {
 #[test]
 #[ignore]
 fn bench_stores_across_pages() {
-    for (pages, flush) in [(16u32, false), (512, false), (2048, false), (8192, false), (512, true), (2048, true), (8192, true)] {
+    for (pages, flush) in [
+        (16u32, false),
+        (512, false),
+        (2048, false),
+        (8192, false),
+        (512, true),
+        (2048, true),
+        (8192, true),
+    ] {
         let mut a = CodeAssembler::new(32).unwrap();
         let mut outer = a.create_label();
         let mut inner = a.create_label();
@@ -172,7 +180,14 @@ fn bench_stores_across_pages() {
         a.int(0x2e).unwrap();
         let code = a.assemble(0x40_1000).unwrap();
         let (mut cpu, mut mem) = setup(&code);
-        mem.alloc(Some(0x100_0000), pages * 0x1000, RegionKind::Private, PAGE_READWRITE, "data").unwrap();
+        mem.alloc(
+            Some(0x100_0000),
+            pages * 0x1000,
+            RegionKind::Private,
+            PAGE_READWRITE,
+            "data",
+        )
+        .unwrap();
         let t = Instant::now();
         loop {
             if flush {
@@ -186,6 +201,9 @@ fn bench_stores_across_pages() {
         }
         let dt = t.elapsed().as_secs_f64();
         let n = cpu.state().insns;
-        eprintln!("{pages:5} pages, flush {flush}: {:.0} MIPS ({n} insns in {dt:.2}s)", n as f64 / dt / 1e6);
+        eprintln!(
+            "{pages:5} pages, flush {flush}: {:.0} MIPS ({n} insns in {dt:.2}s)",
+            n as f64 / dt / 1e6
+        );
     }
 }

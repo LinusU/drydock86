@@ -663,9 +663,9 @@ fn dialog_keyboard(s: &mut Session, hdlg: u32, m: &Msg) -> Result<Option<ApiRet>
                         .map(|c| c.id)
                         .unwrap_or(1),
                 };
-                return Ok(Some(send_command(s, hdlg, id, BN_CLICKED)?));
+                Ok(Some(send_command(s, hdlg, id, BN_CLICKED)?))
             }
-            0x1b => return Ok(Some(send_command(s, hdlg, 2, BN_CLICKED)?)),
+            0x1b => Ok(Some(send_command(s, hdlg, 2, BN_CLICKED)?)),
             0x09 => {
                 let tabs: Vec<u32> = controls
                     .iter()
@@ -683,7 +683,7 @@ fn dialog_keyboard(s: &mut Session, hdlg: u32, m: &Msg) -> Result<Option<ApiRet>
                     Some(i) => tabs[(i + 1) % n],
                     None => tabs[0],
                 };
-                return Ok(Some(run_seq(s, VecDeque::from(vec![Step::Act(Act::Focus(next))]), 1)?));
+                Ok(Some(run_seq(s, VecDeque::from(vec![Step::Act(Act::Focus(next))]), 1)?))
             }
             0x20 => {
                 if let Some(f) = s.window(s.user.focus)
@@ -693,9 +693,9 @@ fn dialog_keyboard(s: &mut Session, hdlg: u32, m: &Msg) -> Result<Option<ApiRet>
                     let id = f.id;
                     return Ok(Some(send_command(s, hdlg, id, BN_CLICKED)?));
                 }
-                return Ok(None);
+                Ok(None)
             }
-            _ => return Ok(None),
+            _ => Ok(None),
         },
         0x0106 | 0x0102 => {
             // WM_SYSCHAR / WM_CHAR: mnemonics (Alt+letter, or the letter itself).

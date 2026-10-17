@@ -153,7 +153,7 @@ unsafe impl Send for HostBuf {}
 
 impl HostBuf {
     pub fn new(len: usize) -> Self {
-        assert!(len > 0 && len % PAGE_SIZE as usize == 0);
+        assert!(len > 0 && len.is_multiple_of(PAGE_SIZE as usize));
         let layout = Layout::from_size_align(len, PAGE_SIZE as usize).unwrap();
         let ptr = unsafe { alloc_zeroed(layout) };
         assert!(!ptr.is_null(), "host allocation of {len} bytes failed");

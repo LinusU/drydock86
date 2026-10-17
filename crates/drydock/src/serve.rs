@@ -134,7 +134,7 @@ fn u32_param(p: &Value, k: &str) -> Result<u32> {
 
 fn hex_decode(s: &str) -> Result<Vec<u8>> {
     let s: String = s.chars().filter(|c| !c.is_whitespace()).collect();
-    if s.len() % 2 != 0 {
+    if !s.len().is_multiple_of(2) {
         bail!("odd-length hex string");
     }
     (0..s.len())

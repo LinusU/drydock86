@@ -634,7 +634,7 @@ fn dev_get_property(s: &mut Session) -> ApiResult {
     match prop {
         1 => s.mem.write_u32(ph + 16, d.buffer_size)?,
         2 => s.mem.write_u32(ph + 16, d.rel_axes as u32)?,
-        3 => s.mem.write_u32(ph + 16, if d.kind == DevKind::Mouse { 1 } else { 1 })?,
+        3 => s.mem.write_u32(ph + 16, 1)?, // DIPROP_GRANULARITY
         4 => {
             let (lo, hi) = d.ranges[prop_obj(&d, how, obj).unwrap_or(0)];
             s.mem.write_u32(ph + 16, lo as u32)?;

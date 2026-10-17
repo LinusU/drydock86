@@ -446,7 +446,7 @@ fn get_sys_color(s: &mut Session) -> ApiResult {
         4 => 0xc8d0d4,
         5 => 0xffffff,
         6 => 0x000000,
-        7 | 8 | 9 => 0x000000,
+        7..=9 => 0x000000,
         10 | 11 => 0xc8d0d4,
         12 => 0x808080,
         13 => 0x6a240a,
@@ -761,22 +761,18 @@ fn run_act(s: &mut Session, a: Act, steps: &mut VecDeque<Step>, ret: &mut u32) -
                 let c = w.client;
                 let moved = old.left != rect.left || old.top != rect.top;
                 let sized = old.w() != rect.w() || old.h() != rect.h();
-                let mut v = Vec::new();
-                v.push(Step::Send {
+                let _ = (moved, sized);
+                if w.visible {
+                    w.invalid = Some(Rect::new(0, 0, c.w(), c.h()));
+                    w.erase_pending = true;
+                }
+                steps.push_front(Step::Send {
                     hwnd,
                     msg: WM_WINDOWPOSCHANGED,
                     wp: 0,
                     lp: LParam::Buf(windowpos(hwnd, &rect, flags).to_vec()),
                     check: Check::None,
                 });
-                let _ = (moved, sized, c);
-                if w.visible {
-                    w.invalid = Some(Rect::new(0, 0, c.w(), c.h()));
-                    w.erase_pending = true;
-                }
-                for st in v.into_iter().rev() {
-                    steps.push_front(st);
-                }
             }
         }
     }
@@ -2521,7 +2517,9 @@ fn load_string_a(s: &mut Session) -> ApiResult {
         off += 2;
         if i == (id & 15) as usize {
             let w: Vec<u16> = data[off..off + len * 2]
-                .chunks_exact(2)
+                .as_chunks::<2>()
+                .0
+                .iter()
                 .map(|c| u16::from_le_bytes([c[0], c[1]]))
                 .collect();
             let st = String::from_utf16_lossy(&w);
@@ -2857,7 +2855,10 @@ fn message_box_a(s: &mut Session) -> ApiResult {
 
 // ---------------------------------------------------------------- display
 
-fn read_devmode(s: &Session, p: u32) -> Result<(u32, Option<u32>, Option<u32>, Option<u32>, Option<u32>), ApiError> {
+/// (field mask, width, height, bits per pixel, refresh) of a DEVMODE.
+type DevMode = (u32, Option<u32>, Option<u32>, Option<u32>, Option<u32>);
+
+fn read_devmode(s: &Session, p: u32) -> Result<DevMode, ApiError> {
     let fields = s.mem.read_u32(p + 40)?;
     let bpp = s.mem.read_u32(p + 104)?;
     let w = s.mem.read_u32(p + 108)?;

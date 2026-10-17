@@ -161,7 +161,9 @@ impl Registry {
     pub fn import_reg(&mut self, bytes: &[u8]) -> Result<usize, String> {
         let text = if bytes.starts_with(&[0xff, 0xfe]) {
             let u: Vec<u16> = bytes[2..]
-                .chunks_exact(2)
+                .as_chunks::<2>()
+                .0
+                .iter()
                 .map(|c| u16::from_le_bytes([c[0], c[1]]))
                 .collect();
             String::from_utf16_lossy(&u)

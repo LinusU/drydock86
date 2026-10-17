@@ -32,7 +32,7 @@ enum Cmd {
         json: bool,
     },
     /// Launch a program.
-    Run(launch::RunArgs),
+    Run(Box<launch::RunArgs>),
     /// Serve the JSON control protocol.
     Serve {
         /// Exchange line-delimited JSON over stdin/stdout.
@@ -60,8 +60,8 @@ fn main() -> Result<()> {
             serve::serve_stdio()
         }
         Cmd::Run(a) => match a.mode {
-            launch::Mode::Play => player::run(a),
-            launch::Mode::Headless => launch::run(a),
+            launch::Mode::Play => player::run(*a),
+            launch::Mode::Headless => launch::run(*a),
         },
     }
 }

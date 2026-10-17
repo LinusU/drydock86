@@ -7,6 +7,10 @@
 //! The same renderer serves windowed and headless sessions; a window only consumes the
 //! presentation copies it is handed.
 
+// Device state is assembled field by field from guest-provided values, and many
+// handlers mirror Win32/COM signatures with long parameter lists.
+#![allow(clippy::field_reassign_with_default, clippy::too_many_arguments)]
+
 use bytemuck::{Pod, Zeroable};
 use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
@@ -1232,7 +1236,7 @@ impl Renderer {
         for op in &p.ops {
             pipes.push(self.pipeline(op.pipe, has_depth));
             let key = (op.textures, op.samplers);
-            if !groups.contains_key(&key) {
+            if let std::collections::hash_map::Entry::Vacant(e) = groups.entry(key) {
                 let s0 = self.sampler(op.samplers[0]);
                 let s1 = self.sampler(op.samplers[1]);
                 let v0 = op.textures[0]
@@ -1265,7 +1269,7 @@ impl Renderer {
                         },
                     ],
                 });
-                groups.insert(key, bg);
+                e.insert(bg);
             }
         }
         let Some(target) = self.textures.get(&p.target) else {

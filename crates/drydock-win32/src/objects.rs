@@ -75,6 +75,10 @@ pub struct ObjEntry {
     pub name: Option<String>,
 }
 
+/// The handle does not name an open object.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct InvalidHandle;
+
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct Objects {
     pub objs: BTreeMap<ObjId, ObjEntry>,
@@ -159,8 +163,8 @@ impl Objects {
     }
 
     /// Close a handle; returns the object if this was the last reference.
-    pub fn close(&mut self, h: u32) -> Result<Option<KObj>, ()> {
-        let id = self.handles.remove(&h).ok_or(())?;
+    pub fn close(&mut self, h: u32) -> Result<Option<KObj>, InvalidHandle> {
+        let id = self.handles.remove(&h).ok_or(InvalidHandle)?;
         Ok(self.release(id))
     }
 }

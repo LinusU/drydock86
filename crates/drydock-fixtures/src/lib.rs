@@ -112,7 +112,9 @@ impl PeBuilder {
         code(&mut a, &layout).expect("fixture code assembles");
         let text = a.assemble(layout.code as u64).expect("fixture code encodes");
 
-        let sections: [(&[u8; 8], u32, &[u8], u32, u32); 3] = [
+        // (name, rva, raw contents, virtual size, characteristics)
+        type Section<'a> = (&'a [u8; 8], u32, &'a [u8], u32, u32);
+        let sections: [Section; 3] = [
             (b".idata\0\0", idata_rva, &idata, idata.len() as u32, 0xC000_0040),
             (b".data\0\0\0", data_rva, &self.data, data_vsize, 0xC000_0040),
             (b".text\0\0\0", code_rva, &text, text.len() as u32, 0x6000_0020),

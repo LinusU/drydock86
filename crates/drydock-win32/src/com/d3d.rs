@@ -1022,18 +1022,6 @@ fn primitive_indices(prim: u32, n: u32, indices: Option<&[u32]>) -> Option<(gfx:
     Some((topo, out))
 }
 
-fn verts_for(prim: u32, count: u32) -> u32 {
-    // Number of vertices consumed by `count` primitives.
-    match prim {
-        1 => count,
-        2 => count * 2,
-        3 => count + 1,
-        4 => count * 3,
-        5 | 6 => count + 2,
-        _ => 0,
-    }
-}
-
 // ---------------------------------------------------------------- device helpers
 
 fn dev_id(s: &Session) -> Result<u32, ApiError> {
@@ -1934,7 +1922,9 @@ fn dev_draw_primitive(s: &mut Session) -> ApiResult {
 fn read_indices16(s: &Session, p: u32, n: u32) -> Result<Vec<u32>, ApiError> {
     let raw = s.mem.read_vec(p, n * 2)?;
     Ok(raw
-        .chunks_exact(2)
+        .as_chunks::<2>()
+        .0
+        .iter()
         .map(|c| u16::from_le_bytes([c[0], c[1]]) as u32)
         .collect())
 }

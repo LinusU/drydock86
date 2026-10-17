@@ -1,4 +1,5 @@
 //! Headless rendering checks (require a wgpu adapter; skipped with a message if none).
+#![allow(clippy::field_reassign_with_default)]
 use drydock_gfx::*;
 
 fn gpu() -> Option<std::sync::Arc<Gpu>> {
@@ -272,8 +273,8 @@ fn depth_upload_round_trips() {
     let z: Vec<f32> = (0..8).map(|i| i as f32 / 8.0).collect();
     r.upload_depth(2, 4, 2, &z);
     let (_, _, d) = r.readback(2).unwrap();
-    for (i, c) in d.chunks_exact(4).enumerate() {
-        let v = f32::from_le_bytes(c.try_into().unwrap());
+    for (i, c) in d.as_chunks::<4>().0.iter().enumerate() {
+        let v = f32::from_le_bytes(*c);
         assert!((v - z[i]).abs() < 1e-6, "texel {i}: {v} != {}", z[i]);
     }
 }

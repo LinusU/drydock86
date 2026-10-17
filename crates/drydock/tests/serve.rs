@@ -112,7 +112,7 @@ fn protocol_session_lifecycle() {
     let regs = c.ok("regs.get", json!({}));
     assert!(regs["regs"]["eip"].as_u64().unwrap() > 0);
     let st = c.ok("state", json!({}));
-    assert!(st["threads"].as_array().unwrap().len() >= 1);
+    assert!(!st["threads"].as_array().unwrap().is_empty());
     let r = c.ok("run", json!({ "seconds": 30 }));
     assert_eq!(r["stop"], json!({ "Exited": { "code": 300 } }));
     let rep = c.ok("report", json!({}));

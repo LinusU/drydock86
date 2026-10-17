@@ -91,7 +91,11 @@ pub fn wide_char_to_multi_byte(s: &mut Session) -> ApiResult {
         v
     } else {
         let raw = s.mem.read_vec(src, n * 2)?;
-        raw.chunks_exact(2).map(|c| u16::from_le_bytes([c[0], c[1]])).collect()
+        raw.as_chunks::<2>()
+            .0
+            .iter()
+            .map(|c| u16::from_le_bytes([c[0], c[1]]))
+            .collect()
     };
     let b = utf16_to_ansi(&w);
     if used != 0 {
@@ -177,7 +181,12 @@ fn read_counted_w(s: &Session, p: u32, n: u32) -> Result<Vec<u16>, ApiError> {
         Ok(s.mem.read_wstr(p, 0x100000)?)
     } else {
         let raw = s.mem.read_vec(p, n * 2)?;
-        Ok(raw.chunks_exact(2).map(|c| u16::from_le_bytes([c[0], c[1]])).collect())
+        Ok(raw
+            .as_chunks::<2>()
+            .0
+            .iter()
+            .map(|c| u16::from_le_bytes([c[0], c[1]]))
+            .collect())
     }
 }
 

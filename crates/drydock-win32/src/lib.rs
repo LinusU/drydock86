@@ -4,6 +4,10 @@
 //! state (memory, threads, kernel objects, windows, devices) is owned by the session
 //! with stable internal ids, so it can be inspected, driven and checkpointed.
 
+// Device state is assembled field by field from guest-provided values, and many
+// handlers mirror Win32/COM signatures with long parameter lists.
+#![allow(clippy::field_reassign_with_default, clippy::too_many_arguments)]
+
 pub mod api;
 pub mod checkpoint;
 pub mod com;

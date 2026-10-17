@@ -638,7 +638,9 @@ fn read_objdesc(s: &Session, p: u32) -> Result<ObjDesc, ApiError> {
     let w = |o: u32, n: u32| -> Result<String, ApiError> {
         let raw = s.mem.read_vec(p + o, n * 2)?;
         let v: Vec<u16> = raw
-            .chunks_exact(2)
+            .as_chunks::<2>()
+            .0
+            .iter()
             .map(|c| u16::from_le_bytes([c[0], c[1]]))
             .take_while(|&c| c != 0)
             .collect();
