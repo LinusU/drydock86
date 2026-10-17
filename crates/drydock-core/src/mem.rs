@@ -57,6 +57,13 @@ pub fn decode_protect(protect: u32) -> Access {
     }
 }
 
+/// Unicorn protection for a Win32 page protection.
+///
+/// Without DEP every readable page is executable for the guest (see
+/// [`decode_protect`]). Only pages with an explicit `PAGE_EXECUTE*` protection are
+/// mapped executable up front, though: the JIT sends every store to an executable
+/// page through code-invalidation checks. Other readable pages gain execute
+/// permission on their first instruction fetch ([`AddressSpace::grant_exec`]).
 pub fn protect_to_uc(protect: u32) -> unicorn_engine::Prot {
     use unicorn_engine::Prot;
     let a = decode_protect(protect);
@@ -67,10 +74,21 @@ pub fn protect_to_uc(protect: u32) -> unicorn_engine::Prot {
     if a.write {
         p |= Prot::WRITE;
     }
-    if a.exec {
+    if a.exec && protect & 0xf0 != 0 {
         p |= Prot::EXEC;
     }
     p
+}
+
+/// The `PAGE_EXECUTE*` protection with the same read/write access.
+fn with_execute(protect: u32) -> u32 {
+    let base = match protect & 0xff {
+        PAGE_READONLY => PAGE_EXECUTE_READ,
+        PAGE_READWRITE => PAGE_EXECUTE_READWRITE,
+        PAGE_WRITECOPY => PAGE_EXECUTE_WRITECOPY,
+        other => other,
+    };
+    (protect & !0xff) | base
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -600,6 +618,27 @@ impl AddressSpace {
             return;
         }
         self.pending_invalidate.push((addr, len));
+    }
+
+    /// Map the page containing `addr` executable for the JIT after an instruction
+    /// fetch faulted there. Returns false when the guest protection forbids
+    /// execution (the fault is then genuine).
+    pub fn grant_exec(&mut self, addr: u32) -> bool {
+        let Some(r) = self.region_at(addr) else {
+            return false;
+        };
+        let i = ((addr - r.base) / PAGE_SIZE) as usize;
+        let p = r.pages[i];
+        if p.state != PageState::Committed || !decode_protect(p.protect).exec || p.protect & 0xf0 != 0 {
+            return false;
+        }
+        self.pending_map.push(MapOp::Protect {
+            base: addr & !(PAGE_SIZE - 1),
+            size: PAGE_SIZE,
+            protect: with_execute(p.protect),
+            committed: true,
+        });
+        true
     }
 
     /// Borrow a contiguous readable range within one region.

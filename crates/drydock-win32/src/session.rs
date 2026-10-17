@@ -473,7 +473,13 @@ impl Session {
                         eip,
                     };
                 }
-                Ok(Stop::Fault(f)) => crate::seh::raise_fault(self, f),
+                Ok(Stop::Fault(f)) => {
+                    // First execution from a readable data page: allowed without DEP.
+                    if f.kind == drydock_core::cpu::FaultKind::FetchProt && self.mem.grant_exec(f.addr) {
+                        continue;
+                    }
+                    crate::seh::raise_fault(self, f)
+                }
             }
         }
     }
@@ -901,4 +907,35 @@ pub fn f80_to_f64(b: &[u8; 10]) -> f64 {
         return if m << 1 == 0 { sign * f64::INFINITY } else { f64::NAN };
     }
     sign * (m as f64) * 2f64.powi(e - 16383 - 63)
+}
+
+#[cfg(test)]
+mod exec_tests {
+    use crate::session::{RunLimit, RunStop};
+    use drydock_fixtures::PeBuilder;
+    use iced_x86::code_asm::*;
+
+    /// Without DEP, code in a read/write data page runs, and rewriting it between
+    /// calls takes effect (the JIT translation is invalidated).
+    #[test]
+    fn data_pages_are_executable_and_rewritable() {
+        // mov eax, 42 ; ret
+        let pe = PeBuilder::new()
+            .import("KERNEL32.DLL", &["ExitProcess"])
+            .data(&[0xb8, 42, 0, 0, 0, 0xc3])
+            .build(|a, l| {
+                a.mov(ebx, l.data)?;
+                a.call(ebx)?;
+                a.mov(esi, eax)?;
+                a.mov(dword_ptr(l.data + 1), 7)?;
+                a.call(ebx)?;
+                a.add(eax, esi)?;
+                a.push(eax)?;
+                a.call(dword_ptr(l.import("KERNEL32.DLL", "ExitProcess")))?;
+                a.int3()
+            });
+        let mut s = crate::testutil::session_with(&pe);
+        let stop = s.run(RunLimit { until_ns: 1_000_000_000, max_insns: None, stop_on_present: false, jump_idle: true });
+        assert_eq!(stop, RunStop::Exited { code: 49 }, "halt: {:?}", s.diag.halt);
+    }
 }
