@@ -762,7 +762,7 @@ impl AddressSpace {
                     if page.iter().all(|&b| b == 0) {
                         continue;
                     }
-                    chunks.push((i as u32, page.to_vec()));
+                    chunks.push(PageData { index: i as u32, bytes: page.to_vec() });
                 }
                 RegionSnapshot {
                     base: r.base,
@@ -788,8 +788,8 @@ impl AddressSpace {
         self.regions.clear();
         for s in snap {
             let mut host = HostBuf::new(s.size as usize);
-            for (idx, bytes) in &s.data {
-                let off = *idx as usize * PAGE_SIZE as usize;
+            for PageData { index, bytes } in &s.data {
+                let off = *index as usize * PAGE_SIZE as usize;
                 host.as_mut_slice()[off..off + bytes.len()].copy_from_slice(bytes);
             }
             self.pending_map.push(MapOp::Map {
@@ -835,8 +835,16 @@ pub struct RegionSnapshot {
     pub alloc_protect: u32,
     pub tag: String,
     pub pages: Vec<Page>,
-    /// (page index, 4 KiB contents) for committed non-zero pages.
-    pub data: Vec<(u32, Vec<u8>)>,
+    /// Contents of the committed non-zero pages.
+    pub data: Vec<PageData>,
+}
+
+/// One 4 KiB page of a region snapshot.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct PageData {
+    pub index: u32,
+    #[serde(with = "serde_bytes")]
+    pub bytes: Vec<u8>,
 }
 
 #[cfg(test)]

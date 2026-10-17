@@ -12,6 +12,7 @@ serde.workspace = true
 thiserror.workspace = true
 log.workspace = true
 rustc-hash.workspace = true
+serde_bytes = "0.11"
 
 [dev-dependencies]
 iced-x86 = { workspace = true, features = ["code_asm"] }
