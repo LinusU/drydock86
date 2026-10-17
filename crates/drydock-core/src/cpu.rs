@@ -154,7 +154,10 @@ pub struct Cpu {
     rdtsc_hook: unicorn_engine::uc_hook,
     /// Base of the FS descriptor currently loaded (the running thread's TEB).
     fs_base: u32,
+    last_tlb_flush: std::time::Instant,
 }
+
+const TLB_FLUSH_INTERVAL: std::time::Duration = std::time::Duration::from_millis(16);
 
 fn uc_err(e: uc_error) -> String {
     format!("{e:?}")
@@ -190,10 +193,10 @@ impl Cpu {
             insns: 0,
             insn_limit: u64::MAX,
             icache: FxHashMap::default(),
+            code_pages: vec![0; 1 << 14],
             breakpoints: FxHashMap::default(),
             skip_breakpoint: None,
             tsc_time_base_ns: 0,
-            code_pages: vec![0; 1 << 14],
             tsc_insn_base: 0,
             ns_per_insn_num: 1,
             ns_per_insn_den: 1,
@@ -307,7 +310,7 @@ impl Cpu {
         })
         .map_err(uc_err)?;
 
-        let mut cpu = Cpu { uc, rdtsc_hook: 0, fs_base: 0 };
+        let mut cpu = Cpu { uc, rdtsc_hook: 0, fs_base: 0, last_tlb_flush: std::time::Instant::now() };
         cpu.install_rdtsc_hook()?;
         Ok(cpu)
     }
@@ -428,12 +431,12 @@ impl Cpu {
             if l == 0 {
                 continue;
             }
-            let end = (a as u64 + l as u64).min(u32::MAX as u64);
-            self.uc.ctl_remove_cache(a as u64, end).map_err(uc_err)?;
-            let st = self.uc.get_data_mut();
             if l != u32::MAX && !self.uc.get_data().has_code(a, l) {
                 continue;
             }
+            let end = (a as u64 + l as u64).min(u32::MAX as u64);
+            self.uc.ctl_remove_cache(a as u64, end).map_err(uc_err)?;
+            let st = self.uc.get_data_mut();
             if l == u32::MAX {
                 st.icache.clear();
             } else if !st.icache.is_empty() {
@@ -551,6 +554,13 @@ impl Cpu {
         time_base_ns: u64,
     ) -> Result<Stop, String> {
         self.flush_mem_ops(mem)?;
+        // Unicorn sizes its software TLB only when the TLB is flushed. Without
+        // periodic flushes it stays at its initial 256 entries and thrashes on
+        // large working sets. This is host-cache maintenance, invisible to the guest.
+        if self.last_tlb_flush.elapsed() >= TLB_FLUSH_INTERVAL {
+            self.uc.ctl_flush_tlb().map_err(uc_err)?;
+            self.last_tlb_flush = std::time::Instant::now();
+        }
         let eip = self.eip();
         {
             let st = self.uc.get_data_mut();
