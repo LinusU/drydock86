@@ -686,9 +686,11 @@ impl Renderer {
             Topology::LineStrip => (wgpu::PrimitiveTopology::LineStrip, Some(wgpu::IndexFormat::Uint32)),
             Topology::Triangles => (wgpu::PrimitiveTopology::TriangleList, None),
         };
+        // Front faces are counter-clockwise in wgpu's y-up clip space, which is
+        // clockwise on the y-down screen D3D reasons about.
         let cull = match kk.cull {
-            2 => Some(wgpu::Face::Front),
-            3 => Some(wgpu::Face::Back),
+            2 => Some(wgpu::Face::Back),
+            3 => Some(wgpu::Face::Front),
             _ => None,
         };
         let depth_stencil = if has_depth {

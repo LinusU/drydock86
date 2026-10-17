@@ -105,3 +105,24 @@ fn texture_modulate_and_alpha_test() {
     assert_eq!(&px[0..4], &[128, 64, 255, 255]);
     assert_eq!(&px[4..8], &[0, 0, 0, 0], "alpha-tested texel must be discarded");
 }
+
+/// D3D cull modes refer to the winding seen on screen (y down): CULL_CCW (3) keeps
+/// triangles whose screen-space vertices run clockwise, CULL_CW (2) the opposite.
+#[test]
+fn cull_modes_follow_screen_winding() {
+    let Some(g) = gpu() else { return };
+    let mut r = Renderer::new(g);
+    let vp = Viewport { x: 0.0, y: 0.0, w: 4.0, h: 4.0, min_z: 0.0, max_z: 1.0 };
+    let u = base_uniforms(4.0, 4.0);
+    let w = [255, 255, 255, 255];
+    // Clockwise on screen: top-left, top-right, bottom-left.
+    let cw = [tl(-0.5, -0.5, 0.0, w), tl(3.5, -0.5, 0.0, w), tl(-0.5, 3.5, 0.0, w)];
+    for (cull, idx, visible) in [(3, [0, 1, 2], true), (3, [0, 2, 1], false), (2, [0, 1, 2], false), (2, [0, 2, 1], true)] {
+        r.ensure_texture(1, 4, 4, 1, TexFormat::Color);
+        r.upload(1, 0, 4, 4, &[0u8; 64]);
+        let key = PipeKey { topology: Topology::Triangles, blend: None, depth: None, cull, color_write: true };
+        r.draw(1, None, key, &u, &cw, &idx, [None, None], [SamplerKey::default(); 2], vp, [0, 0, 4, 4]);
+        let (_, _, px) = r.readback(1).unwrap();
+        assert_eq!(px[0] == 255, visible, "cull {cull} order {idx:?}");
+    }
+}
