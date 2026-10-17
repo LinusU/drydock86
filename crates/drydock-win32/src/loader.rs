@@ -905,3 +905,12 @@ pub fn persist_registry(s: &Session) -> std::io::Result<()> {
     }
     Ok(())
 }
+
+impl Session {
+    /// Write the file-system overlay and the registry to the persistent overlay
+    /// directory, if the session has one.
+    pub fn persist(&self) -> std::io::Result<()> {
+        self.vfs.persist()?;
+        persist_registry(self)
+    }
+}

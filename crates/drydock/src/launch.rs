@@ -32,6 +32,9 @@ pub struct RunArgs {
     /// Registry files (.reg) to import before start.
     #[arg(long = "reg")]
     pub reg: Vec<PathBuf>,
+    /// Load the overlay but do not write changes back at the end of the run.
+    #[arg(long)]
+    pub no_persist: bool,
     /// Directory holding the persistent writable overlay (saves, settings).
     #[arg(long)]
     pub overlay: Option<PathBuf>,
@@ -300,6 +303,9 @@ pub fn run(a: RunArgs) -> Result<()> {
         let stop = d.advance((a.seconds * 1e9) as u64, false);
         (stop, None, true)
     };
+    if !a.no_persist {
+        d.s.persist().context("writing the overlay")?;
+    }
     let mut rep = report(&d, &stop);
     rep["scenario_ok"] = serde_json::json!(ok);
     rep["scenario_log"] = serde_json::json!(scenario_log);

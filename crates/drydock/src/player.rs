@@ -199,7 +199,6 @@ fn session_thread(args: RunArgs, rx: Receiver<ToSession>, tx: SyncSender<ToUi>, 
                 Ok(ToSession::Quit) | Err(TryRecvError::Disconnected) => {
                     let now = d.s.clock.now_ns();
                     d.s.user.input.release_all(now);
-                    let _ = d.s.vfs.persist();
                     write_artifacts(&mut d, &args, &RunStop::Cancelled);
                     return;
                 }
@@ -246,6 +245,9 @@ fn session_thread(args: RunArgs, rx: Receiver<ToSession>, tx: SyncSender<ToUi>, 
 
 /// Report, provenance (including the recorded input timeline) and the last frame.
 fn write_artifacts(d: &mut Driver, args: &RunArgs, stop: &RunStop) {
+    if !args.no_persist {
+        let _ = d.s.persist();
+    }
     let dir = args.artifacts.clone().unwrap_or_else(|| "local/artifacts/play".into());
     let _ = std::fs::create_dir_all(&dir);
     let rep = crate::launch::report(d, stop);

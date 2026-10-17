@@ -169,6 +169,11 @@ impl Server {
             })),
             "open" => self.open_session(p),
             "close" => {
+                if let Some(o) = &self.open
+                    && !o.args.no_persist
+                {
+                    o.d.s.persist().context("writing the overlay")?;
+                }
                 self.open = None;
                 *self.cancel.lock().unwrap() = None;
                 Ok(json!({}))
@@ -420,6 +425,11 @@ impl Server {
 
     fn open_session(&mut self, p: &Value) -> Result<Value> {
         let mut args = run_args_from_json(p)?;
+        if let Some(o) = &self.open
+            && !o.args.no_persist
+        {
+            o.d.s.persist().context("writing the previous session's overlay")?;
+        }
         if p.get("pacing").is_none() {
             args.pacing = Pacing::Unthrottled;
         }
@@ -536,7 +546,14 @@ pub fn serve_stdio() -> Result<()> {
         let method = req["method"].as_str().unwrap_or("").to_string();
         let params = req.get("params").cloned().unwrap_or(json!({}));
         if method == "shutdown" {
-            send(&out, &json!({ "id": id, "result": {} }));
+            let r = match &srv.open {
+                Some(o) if !o.args.no_persist => o.d.s.persist().map(|_| json!({})).map_err(|e| e.to_string()),
+                _ => Ok(json!({})),
+            };
+            send(&out, &match r {
+                Ok(v) => json!({ "id": id, "result": v }),
+                Err(e) => json!({ "id": id, "error": { "code": "failed", "message": format!("writing the overlay: {e}") } }),
+            });
             break;
         }
         let res = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| srv.handle(&method, &params)));
