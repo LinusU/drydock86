@@ -298,6 +298,8 @@ pub struct Renderer {
     white: wgpu::TextureView,
     pending: Option<PendingPass>,
     uniform_align: u32,
+    /// Lazily built pass that writes depth values from an R32Float texture.
+    depth_upload: Option<(wgpu::RenderPipeline, wgpu::BindGroupLayout)>,
     pub stats: RenderStats,
 }
 
@@ -314,6 +316,17 @@ pub struct RenderStats {
 
 const COLOR_FORMAT: wgpu::TextureFormat = wgpu::TextureFormat::Rgba8Unorm;
 const DEPTH_FORMAT: wgpu::TextureFormat = wgpu::TextureFormat::Depth32Float;
+
+const DEPTH_UPLOAD_WGSL: &str = "
+@group(0) @binding(0) var src: texture_2d<f32>;
+@vertex fn vs(@builtin(vertex_index) i: u32) -> @builtin(position) vec4<f32> {
+    let p = vec2<f32>(f32((i << 1u) & 2u), f32(i & 2u));
+    return vec4<f32>(p * 2.0 - 1.0, 0.0, 1.0);
+}
+@fragment fn fs(@builtin(position) pos: vec4<f32>) -> @builtin(frag_depth) f32 {
+    return textureLoad(src, vec2<i32>(pos.xy), 0).r;
+}
+";
 
 fn blend_factor(f: u32, alpha: bool) -> wgpu::BlendFactor {
     use wgpu::BlendFactor as B;
@@ -447,6 +460,7 @@ impl Renderer {
             white,
             pending: None,
             uniform_align,
+            depth_upload: None,
             stats: RenderStats::default(),
         }
     }
@@ -631,6 +645,120 @@ impl Renderer {
         self.stats.readbacks += 1;
         self.stats.readback_bytes += out.len() as u64;
         Some((w, h, out))
+    }
+
+    /// Replace the contents of a depth target with per-pixel values in [0, 1].
+    pub fn upload_depth(&mut self, key: u32, w: u32, h: u32, z: &[f32]) {
+        self.flush_if_referenced(key);
+        let Some(t) = self.textures.get(&key) else {
+            return;
+        };
+        if t.format != TexFormat::Depth || z.len() < (w * h) as usize {
+            return;
+        }
+        let (w, h) = (w.min(t.w), h.min(t.h));
+        let d = &self.gpu.device;
+        if self.depth_upload.is_none() {
+            let module = d.create_shader_module(wgpu::ShaderModuleDescriptor {
+                label: Some("depth-upload"),
+                source: wgpu::ShaderSource::Wgsl(DEPTH_UPLOAD_WGSL.into()),
+            });
+            let bgl = d.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+                label: Some("depth-upload"),
+                entries: &[wgpu::BindGroupLayoutEntry {
+                    binding: 0,
+                    visibility: wgpu::ShaderStages::FRAGMENT,
+                    ty: wgpu::BindingType::Texture {
+                        sample_type: wgpu::TextureSampleType::Float { filterable: false },
+                        view_dimension: wgpu::TextureViewDimension::D2,
+                        multisampled: false,
+                    },
+                    count: None,
+                }],
+            });
+            let layout = d.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
+                label: Some("depth-upload"),
+                bind_group_layouts: &[Some(&bgl)],
+                immediate_size: 0,
+            });
+            let pipe = d.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
+                label: Some("depth-upload"),
+                layout: Some(&layout),
+                vertex: wgpu::VertexState {
+                    module: &module,
+                    entry_point: Some("vs"),
+                    compilation_options: Default::default(),
+                    buffers: &[],
+                },
+                primitive: Default::default(),
+                depth_stencil: Some(wgpu::DepthStencilState {
+                    format: DEPTH_FORMAT,
+                    depth_write_enabled: Some(true),
+                    depth_compare: Some(wgpu::CompareFunction::Always),
+                    stencil: Default::default(),
+                    bias: Default::default(),
+                }),
+                multisample: Default::default(),
+                fragment: Some(wgpu::FragmentState {
+                    module: &module,
+                    entry_point: Some("fs"),
+                    compilation_options: Default::default(),
+                    targets: &[],
+                }),
+                multiview_mask: None,
+                cache: None,
+            });
+            self.depth_upload = Some((pipe, bgl));
+        }
+        let (pipe, bgl) = self.depth_upload.as_ref().unwrap();
+        let src = d.create_texture(&wgpu::TextureDescriptor {
+            label: Some("depth-src"),
+            size: wgpu::Extent3d { width: w, height: h, depth_or_array_layers: 1 },
+            mip_level_count: 1,
+            sample_count: 1,
+            dimension: wgpu::TextureDimension::D2,
+            format: wgpu::TextureFormat::R32Float,
+            usage: wgpu::TextureUsages::TEXTURE_BINDING | wgpu::TextureUsages::COPY_DST,
+            view_formats: &[],
+        });
+        let mut bytes = Vec::with_capacity((w * h * 4) as usize);
+        for v in &z[..(w * h) as usize] {
+            bytes.extend(v.clamp(0.0, 1.0).to_le_bytes());
+        }
+        self.gpu.queue.write_texture(
+            src.as_image_copy(),
+            &bytes,
+            wgpu::TexelCopyBufferLayout { offset: 0, bytes_per_row: Some(w * 4), rows_per_image: None },
+            wgpu::Extent3d { width: w, height: h, depth_or_array_layers: 1 },
+        );
+        let view = src.create_view(&Default::default());
+        let bg = d.create_bind_group(&wgpu::BindGroupDescriptor {
+            label: Some("depth-upload"),
+            layout: bgl,
+            entries: &[wgpu::BindGroupEntry { binding: 0, resource: wgpu::BindingResource::TextureView(&view) }],
+        });
+        let mut enc = d.create_command_encoder(&Default::default());
+        {
+            let mut rp = enc.begin_render_pass(&wgpu::RenderPassDescriptor {
+                label: Some("depth-upload"),
+                color_attachments: &[],
+                depth_stencil_attachment: Some(wgpu::RenderPassDepthStencilAttachment {
+                    view: &t.view,
+                    depth_ops: Some(wgpu::Operations { load: wgpu::LoadOp::Load, store: wgpu::StoreOp::Store }),
+                    stencil_ops: None,
+                }),
+                timestamp_writes: None,
+                occlusion_query_set: None,
+                multiview_mask: None,
+            });
+            rp.set_viewport(0.0, 0.0, w as f32, h as f32, 0.0, 1.0);
+            rp.set_pipeline(pipe);
+            rp.set_bind_group(0, &bg, &[]);
+            rp.draw(0..3, 0..1);
+        }
+        self.gpu.queue.submit([enc.finish()]);
+        self.stats.uploads += 1;
+        self.stats.upload_bytes += bytes.len() as u64;
     }
 
     /// GPU copy between two color textures of the same size (e.g. for presentation).

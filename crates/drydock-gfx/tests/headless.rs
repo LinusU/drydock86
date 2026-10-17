@@ -126,3 +126,17 @@ fn cull_modes_follow_screen_winding() {
         assert_eq!(px[0] == 255, visible, "cull {cull} order {idx:?}");
     }
 }
+
+#[test]
+fn depth_upload_round_trips() {
+    let Some(g) = gpu() else { return };
+    let mut r = Renderer::new(g);
+    r.ensure_texture(2, 4, 2, 1, TexFormat::Depth);
+    let z: Vec<f32> = (0..8).map(|i| i as f32 / 8.0).collect();
+    r.upload_depth(2, 4, 2, &z);
+    let (_, _, d) = r.readback(2).unwrap();
+    for (i, c) in d.chunks_exact(4).enumerate() {
+        let v = f32::from_le_bytes(c.try_into().unwrap());
+        assert!((v - z[i]).abs() < 1e-6, "texel {i}: {v} != {}", z[i]);
+    }
+}
