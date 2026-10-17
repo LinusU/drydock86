@@ -503,6 +503,67 @@ fn write_ddcaps(s: &mut Session, p: u32, hel: bool) -> Result<(), ApiError> {
     Ok(())
 }
 
+fn surface_matches(s: &Session, sf: &SurfObj, filter: &[u8]) -> bool {
+    let g = |o: usize| u32::from_le_bytes(filter[o..o + 4].try_into().unwrap());
+    let flags = g(4);
+    let px = &s.display.surfaces[&sf.surface];
+    if flags & DDSD_CAPS != 0 && sf.caps & g(104) != g(104) {
+        return false;
+    }
+    if flags & DDSD_WIDTH != 0 && px.w != g(12) {
+        return false;
+    }
+    if flags & DDSD_HEIGHT != 0 && px.h != g(8) {
+        return false;
+    }
+    if flags & DDSD_PIXELFORMAT != 0 && Fmt::from_ddpf(&filter[72..104]) != Some(px.fmt) {
+        return false;
+    }
+    true
+}
+
+fn dd_enum_surfaces(s: &mut Session) -> ApiResult {
+    let [_this, flags, pdesc, ctx, cb] = s.args::<5>()?;
+    let dd = dd_self(s)?;
+    if flags & 0x10 == 0 {
+        // DDENUMSURFACES_CANBECREATED
+        s.missing("EnumSurfaces", format!("flags {flags:#x}"));
+        return Ok(ApiRet::Ret(DDERR_UNSUPPORTED));
+    }
+    let filter = if pdesc != 0 {
+        let n = s.mem.read_u32(pdesc)?;
+        Some(s.mem.read_vec(pdesc, n.max(108))?)
+    } else {
+        None
+    };
+    let all = flags & 1 != 0;
+    let nomatch = flags & 4 != 0;
+    let ids: Vec<u32> = s
+        .com
+        .objs
+        .iter()
+        .filter_map(|(id, o)| match &o.kind {
+            ComKind::Surface(sf) if sf.ddraw == dd => Some((*id, sf.clone())),
+            _ => None,
+        })
+        .filter(|(_, sf)| {
+            all || filter.as_ref().is_none_or(|f| surface_matches(s, sf, f) != nomatch)
+        })
+        .map(|(id, _)| id)
+        .collect();
+    let mut items = Vec::new();
+    for id in ids {
+        let sf = s.surf(id).unwrap().clone();
+        let px = s.display.surfaces[&sf.surface].clone();
+        let p = s.iface(id, &IDIRECTDRAWSURFACE7)?;
+        // The callback receives a reference it must release.
+        s.com_addref(id);
+        let d = build_ddsd(124, DDSD_CAPS | DDSD_WIDTH | DDSD_HEIGHT | DDSD_PIXELFORMAT | DDSD_PITCH, px.w, px.h, px.pitch, px.fmt, sf.caps, sf.caps2, 0, 0);
+        items.push(vec![CallArg::Val(p), CallArg::Buf(d), CallArg::Val(ctx)]);
+    }
+    enum_callbacks(cb, items, 0, DD_OK)
+}
+
 fn dd_get_caps(s: &mut Session) -> ApiResult {
     let [_this, drv, hel] = s.args::<3>()?;
     write_ddcaps(s, drv, false)?;
@@ -1853,7 +1914,7 @@ pub static IDIRECTDRAW7: IfaceDef = IfaceDef {
         export!("CreateSurface", 4, dd_create_surface),
         unimpl_method!("DuplicateSurface", 3),
         export!("EnumDisplayModes", 5, dd_enum_display_modes),
-        unimpl_method!("EnumSurfaces", 5),
+        export!("EnumSurfaces", 5, dd_enum_surfaces),
         export!("FlipToGDISurface", 1, dd_flip_to_gdi_surface),
         export!("GetCaps", 3, dd_get_caps),
         export!("GetDisplayMode", 2, dd_get_display_mode),
