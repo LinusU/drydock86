@@ -154,10 +154,7 @@ pub struct Cpu {
     rdtsc_hook: unicorn_engine::uc_hook,
     /// Base of the FS descriptor currently loaded (the running thread's TEB).
     fs_base: u32,
-    last_tlb_flush: std::time::Instant,
 }
-
-const TLB_FLUSH_INTERVAL: std::time::Duration = std::time::Duration::from_millis(16);
 
 fn uc_err(e: uc_error) -> String {
     format!("{e:?}")
@@ -310,7 +307,7 @@ impl Cpu {
         })
         .map_err(uc_err)?;
 
-        let mut cpu = Cpu { uc, rdtsc_hook: 0, fs_base: 0, last_tlb_flush: std::time::Instant::now() };
+        let mut cpu = Cpu { uc, rdtsc_hook: 0, fs_base: 0 };
         cpu.install_rdtsc_hook()?;
         Ok(cpu)
     }
@@ -554,13 +551,6 @@ impl Cpu {
         time_base_ns: u64,
     ) -> Result<Stop, String> {
         self.flush_mem_ops(mem)?;
-        // Unicorn sizes its software TLB only when the TLB is flushed. Without
-        // periodic flushes it stays at its initial 256 entries and thrashes on
-        // large working sets. This is host-cache maintenance, invisible to the guest.
-        if self.last_tlb_flush.elapsed() >= TLB_FLUSH_INTERVAL {
-            self.uc.ctl_flush_tlb().map_err(uc_err)?;
-            self.last_tlb_flush = std::time::Instant::now();
-        }
         let eip = self.eip();
         {
             let st = self.uc.get_data_mut();
