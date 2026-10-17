@@ -222,6 +222,16 @@ fn code_pages_by_region(s: &Session) -> Vec<serde_json::Value> {
     by.into_iter().map(|((base, tag), n)| serde_json::json!({ "base": base, "tag": tag, "pages": n })).collect()
 }
 
+/// User plus system CPU time of this process (steadier than wall time on a busy host).
+fn host_cpu_seconds() -> f64 {
+    let mut u: libc::rusage = unsafe { std::mem::zeroed() };
+    if unsafe { libc::getrusage(libc::RUSAGE_SELF, &mut u) } != 0 {
+        return 0.0;
+    }
+    let t = |v: libc::timeval| v.tv_sec as f64 + v.tv_usec as f64 / 1e6;
+    t(u.ru_utime) + t(u.ru_stime)
+}
+
 fn top_apis(s: &Session) -> Vec<serde_json::Value> {
     let mut v: Vec<_> = s.diag.api_counts.iter().collect();
     v.sort_by(|a, b| b.1.cmp(a.1));
@@ -237,6 +247,7 @@ pub fn report(d: &crate::driver::Driver, stop: &RunStop) -> serde_json::Value {
         "virtual_s": virt,
         "wall_s": wall,
         "speed": if wall > 0.0 { virt / wall } else { 0.0 },
+        "host_cpu_s": host_cpu_seconds(),
         "insns": s.cpu.state().insns,
         "mips": s.cpu.state().insns as f64 / wall.max(1e-9) / 1e6,
         "frames_presented": s.frames_presented,

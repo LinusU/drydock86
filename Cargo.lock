@@ -713,6 +713,7 @@ dependencies = [
  "env_logger",
  "hex",
  "iced-x86",
+ "libc",
  "log",
  "pollster",
  "serde",
