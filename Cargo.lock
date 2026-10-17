@@ -763,6 +763,13 @@ dependencies = [
 ]
 
 [[package]]
+name = "drydock-media"
+version = "0.1.0"
+dependencies = [
+ "thiserror 2.0.21",
+]
+
+[[package]]
 name = "drydock-win32"
 version = "0.1.0"
 dependencies = [

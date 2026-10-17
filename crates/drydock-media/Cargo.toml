@@ -1,0 +1,10 @@
+[package]
+name = "drydock-media"
+description = "Drydock media formats: AVI container parsing"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+thiserror.workspace = true
+
