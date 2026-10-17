@@ -776,8 +776,75 @@ fn streams_from_fvf(base: u32, fvf: u32) -> Streams {
 }
 
 fn read_vertices(s: &Session, st: &Streams, fvf: u32, first: u32, count: u32) -> Result<Vec<gfx::Vertex>, ApiError> {
-    let mut out = Vec::with_capacity(count as usize);
+    if count == 0 {
+        return Ok(Vec::new());
+    }
     let rhw = fvf & 0xe == 0x4;
+    // (stream, bytes read per vertex) for the components present.
+    let comps: [((u32, u32), u32); 6] = [
+        (st.pos, if rhw { 16 } else { 12 }),
+        (st.normal, 12),
+        (st.diffuse, 4),
+        (st.specular, 4),
+        (st.tex[0], 8),
+        (st.tex[1], 8),
+    ];
+    // Borrow the whole range once when it lies in one region; otherwise fall back
+    // to checked reads (which report the exact faulting address).
+    let mut lo = u64::MAX;
+    let mut hi = 0u64;
+    for ((base, stride), size) in comps {
+        if base == 0 {
+            continue;
+        }
+        let a = base as u64 + first as u64 * stride as u64;
+        let e = base as u64 + (first + count - 1) as u64 * stride as u64 + size as u64;
+        lo = lo.min(a);
+        hi = hi.max(e);
+    }
+    let span = (hi > lo && hi - lo <= u32::MAX as u64)
+        .then(|| s.mem.slice(lo as u32, (hi - lo) as u32).ok())
+        .flatten();
+    let Some(bytes) = span else {
+        return read_vertices_checked(s, st, rhw, first, count);
+    };
+    let lo = lo as u32;
+    let f = |a: u32| {
+        let o = (a - lo) as usize;
+        f32::from_le_bytes(bytes[o..o + 4].try_into().unwrap())
+    };
+    let u = |a: u32| {
+        let o = (a - lo) as usize;
+        u32::from_le_bytes(bytes[o..o + 4].try_into().unwrap())
+    };
+    let mut out = Vec::with_capacity(count as usize);
+    for i in first..first + count {
+        let mut v = gfx::Vertex::default();
+        let p = st.pos.0 + i * st.pos.1;
+        v.pos = [f(p), f(p + 4), f(p + 8), if rhw { f(p + 12) } else { 1.0 }];
+        if st.normal.0 != 0 {
+            let n = st.normal.0 + i * st.normal.1;
+            v.normal = [f(n), f(n + 4), f(n + 8)];
+        }
+        v.diffuse = if st.diffuse.0 != 0 { color_rgba(u(st.diffuse.0 + i * st.diffuse.1)) } else { [255; 4] };
+        if st.specular.0 != 0 {
+            v.specular = color_rgba(u(st.specular.0 + i * st.specular.1));
+        }
+        if st.tex[0].0 != 0 {
+            let t = st.tex[0].0 + i * st.tex[0].1;
+            v.uv0 = [f(t), f(t + 4)];
+        }
+        if st.tex[1].0 != 0 {
+            let t = st.tex[1].0 + i * st.tex[1].1;
+            v.uv1 = [f(t), f(t + 4)];
+        }
+        out.push(v);
+    }
+    Ok(out)
+}
+
+fn read_vertices_checked(s: &Session, st: &Streams, rhw: bool, first: u32, count: u32) -> Result<Vec<gfx::Vertex>, ApiError> {
+    let mut out = Vec::with_capacity(count as usize);
     let f = |a: u32| -> Result<f32, ApiError> { Ok(s.mem.read_f32(a)?) };
     for i in first..first + count {
         let mut v = gfx::Vertex::default();
@@ -787,11 +854,7 @@ fn read_vertices(s: &Session, st: &Streams, fvf: u32, first: u32, count: u32) ->
             let n = st.normal.0 + i * st.normal.1;
             v.normal = [f(n)?, f(n + 4)?, f(n + 8)?];
         }
-        if st.diffuse.0 != 0 {
-            v.diffuse = color_rgba(s.mem.read_u32(st.diffuse.0 + i * st.diffuse.1)?);
-        } else {
-            v.diffuse = [255; 4];
-        }
+        v.diffuse = if st.diffuse.0 != 0 { color_rgba(s.mem.read_u32(st.diffuse.0 + i * st.diffuse.1)?) } else { [255; 4] };
         if st.specular.0 != 0 {
             v.specular = color_rgba(s.mem.read_u32(st.specular.0 + i * st.specular.1)?);
         }
@@ -805,7 +868,6 @@ fn read_vertices(s: &Session, st: &Streams, fvf: u32, first: u32, count: u32) ->
         }
         out.push(v);
     }
-    let _ = fvf;
     Ok(out)
 }
 
