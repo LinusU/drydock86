@@ -97,6 +97,10 @@ pub struct HookState {
     pub trace: Option<std::collections::VecDeque<TraceEntry>>,
     pub trace_cap: usize,
     pub blocks: u64,
+    /// Mapping/protection changes applied to Unicorn (each flushes its TLB).
+    pub map_ops: u64,
+    /// Translated-code invalidations applied.
+    pub invalidations: u64,
 }
 
 impl HookState {
@@ -208,6 +212,8 @@ impl Cpu {
             trace: None,
             trace_cap: 0,
             blocks: 0,
+            map_ops: 0,
+            invalidations: 0,
         };
         let mut uc = Unicorn::new_with_data(Arch::X86, Mode::MODE_32, hs).map_err(uc_err)?;
         uc.ctl_set_cpu_model(X86CpuModel::PENTIUM3 as i32).map_err(uc_err)?;
@@ -389,6 +395,7 @@ impl Cpu {
 
     /// Apply pending mapping changes and code invalidations to Unicorn.
     pub fn flush_mem_ops(&mut self, mem: &mut AddressSpace) -> Result<(), String> {
+        self.uc.get_data_mut().map_ops += mem.pending_map.len() as u64;
         for op in mem.pending_map.drain(..) {
             match op {
                 MapOp::Map { base, size, ptr } => unsafe {
@@ -423,6 +430,7 @@ impl Cpu {
                 continue;
             }
             let end = (a as u64 + l as u64).min(u32::MAX as u64);
+            self.uc.get_data_mut().invalidations += 1;
             self.uc.ctl_remove_cache(a as u64, end).map_err(uc_err)?;
             let st = self.uc.get_data_mut();
             if l == u32::MAX {
