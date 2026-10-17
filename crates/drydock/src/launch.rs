@@ -152,7 +152,11 @@ pub fn audio_sink(spec: &str) -> Result<Option<Box<dyn drydock_audio::AudioSink>
             "discard" => sinks.push(Box::new(drydock_audio::NullSink { frames: 0 })),
             "device" => sinks.push(Box::new(drydock_audio::DeviceSink::open().map_err(anyhow::Error::msg)?)),
             p if p.starts_with("wav:") => {
-                sinks.push(Box::new(drydock_audio::WavSink::create(std::path::Path::new(&p[4..]))?))
+                let path = std::path::Path::new(&p[4..]);
+                if let Some(dir) = path.parent().filter(|d| !d.as_os_str().is_empty()) {
+                    std::fs::create_dir_all(dir)?;
+                }
+                sinks.push(Box::new(drydock_audio::WavSink::create(path)?))
             }
             other => bail!("unknown audio output {other:?}"),
         }
