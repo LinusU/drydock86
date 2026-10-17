@@ -16,8 +16,14 @@ See [docs/status.md](docs/status.md) for what works today and what does not.
 
 ## Building
 
-Requirements: a Rust toolchain (1.88 or newer, edition 2024), CMake and a C compiler
-(Unicorn is built from source by `unicorn-engine-sys`).
+Requirements: a Rust toolchain (1.88 or newer, edition 2024), CMake, a C compiler and
+libclang (Unicorn is built from source by `unicorn-engine-sys`, whose bindings are
+generated with bindgen). On Linux, ALSA headers are needed for host audio. On
+Debian/Ubuntu:
+
+```bash
+sudo apt-get install cmake clang libclang-dev pkg-config libasound2-dev
+```
 
 ```bash
 cargo build --release

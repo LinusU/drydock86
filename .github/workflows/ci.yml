@@ -17,7 +17,7 @@ jobs:
         with:
           components: rustfmt, clippy
       - name: Install system libraries
-        run: sudo apt-get update && sudo apt-get install -y cmake libasound2-dev pkg-config
+        run: sudo apt-get update && sudo apt-get install -y cmake clang libclang-dev libasound2-dev pkg-config
       - run: cargo fmt --all -- --check
       - run: cargo clippy --workspace --all-targets --locked -- -D warnings
 
@@ -33,7 +33,7 @@ jobs:
       - uses: dtolnay/rust-toolchain@stable
       - name: Install system libraries (Linux, with Lavapipe for headless GPU tests)
         if: runner.os == 'Linux'
-        run: sudo apt-get update && sudo apt-get install -y cmake libasound2-dev pkg-config mesa-vulkan-drivers
+        run: sudo apt-get update && sudo apt-get install -y cmake clang libclang-dev libasound2-dev pkg-config mesa-vulkan-drivers
       - name: Build
         run: cargo build --workspace --release --locked
       - name: Test
