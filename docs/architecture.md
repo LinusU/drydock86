@@ -48,9 +48,13 @@ Guest self-modifying code is handled by Unicorn itself.
 Protections follow Windows 2000 on x86 without DEP: every readable page is
 executable for the guest. In the JIT, only `PAGE_EXECUTE*` pages are mapped
 executable up front; a readable page gains execute permission on its first
-instruction fetch (`AddressSpace::grant_exec`). This keeps stores to data pages on
-Unicorn's fast path (stores to executable pages go through code-invalidation checks)
-without changing what the guest can do.
+instruction fetch (`AddressSpace::grant_exec`), and a second fetch fault on the same
+page is a real fault. Unicorn is used with a small patch (`vendor/README.md`) so that
+stores to memory mapped non-executable stay on its fast path; stores to executable
+memory keep the code-invalidation checks that make self-modifying code work. No
+Unicorn memory hooks are installed in normal operation (any installed memory hook
+forces Unicorn's slow path); faults are reported by `emu_start` and their address is
+reconstructed by decoding the faulting instruction's memory operands with iced-x86.
 
 Heaps (`heap.rs`) keep their bookkeeping in Rust, outside guest memory, so a guest
 overrun cannot corrupt allocator metadata; allocation is deterministic best fit.

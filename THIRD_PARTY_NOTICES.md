@@ -18,7 +18,7 @@ rasterize GDI text for guest programs; they are unmodified.
 
 | Component | Version | Licence | Use |
 | --- | --- | --- | --- |
-| Unicorn engine (`unicorn-engine`, `unicorn-engine-sys`, including the bundled QEMU-derived C sources) | 2.1.5 (pinned) | GPL-2.0 | x86 CPU emulation |
+| Unicorn engine (`unicorn-engine`, `unicorn-engine-sys`, including the bundled QEMU-derived C sources) | 2.1.5 (pinned; `unicorn-engine-sys` vendored in `vendor/` with the modifications listed in `vendor/README.md`) | GPL-2.0 | x86 CPU emulation |
 | wgpu, wgpu-core, wgpu-hal, wgpu-types | 29.0.4 (pinned) | MIT OR Apache-2.0 | Graphics |
 | naga (via wgpu) | 29.x | MIT OR Apache-2.0 | Shader translation |
 | iced-x86 | 1.21.0 (pinned) | MIT | Instruction decoding (counting), test assembler |

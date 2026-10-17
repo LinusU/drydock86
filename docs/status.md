@@ -109,46 +109,66 @@ reported at run time as a structured diagnostic, never as fake success.
 
 ## Performance
 
-Measured on an Apple M5 Max that was simultaneously running other projects' builds
-(load average 3–4), which makes single measurements vary by up to ±20 %; figures are
-best of three unless noted.
+Measured on an Apple M5 Max shared with other projects' parallel builds (load
+average 3–5). Under that load the same run lands in one of two host speed states,
+about 1.4× apart for identical work (CPU time scales the same way, which points at
+core placement or frequency rather than Drydock); figures below are the best of
+several runs, i.e. the faster state, unless noted. Guest instruction counts are
+identical across all runs of a workload.
 
 | Workload | Guest time | Host time | Speed |
 | --- | --- | --- | --- |
-| Menus and loading (`drive1` steps 0–4) | 11.1 s | 4.9 s | 2.3× |
-| Driving, 9 s from a race-start checkpoint (unthrottled, no audio) | 8.86 s | 16.7 s | 0.53× |
-| Same, tracing every API call into a 10,000-entry ring (`--trace !`) | 8.86 s | 17.0 s | 0.52× (identical guest instruction count) |
-| Interactive player, `drive1` input replayed, device audio | 31.1 s | 57.8 s | 0.54× overall |
-| Sustained soak (`soak2`, mostly driving, WAV capture) | 676.5 s | 915 s | 0.74× overall |
+| `drive1` (menus, loading, Quick Race driving), headless unthrottled | 31.06 s | 23.4 s | 1.33× |
+| Driving, 8.86 s from a race-start checkpoint, headless unthrottled | 8.86 s | 7.30 s | 1.21× |
+| Same, slow host state | 8.86 s | 13.0 s | 0.68× |
+| Same, tracing every API call into a 10,000-entry ring (`--trace !`) | 8.86 s | | within 2 % of untraced |
+| Same segment in the desktop player (realtime pacing, device audio) | 8.86 s | 9.7 s | 0.92× |
+| `drive1` input replayed in the desktop player (realtime pacing) | 31.06 s | 39.5 s | 0.79× |
+| 11-minute soak (`soak2`, mostly driving, WAV capture), before patch 0002 | 676.5 s | 509 s | 1.33× |
 
-Driving is CPU-bound in Drydock: the game executes roughly 500 million guest
-instructions per virtual second there (about 64 % of the 800 MIPS profile). Host
-profile of the driving segment: about 75 % in Unicorn (generated code, softfloat x87
-helpers, the exit check Unicorn inserts after every guest memory access, slow-path
-stores), about 7 % in Direct3D draw translation, 7 % submitting frames to wgpu, the
-rest in API dispatch and device servicing. Unicorn's software TLB is the main
-limit on store throughput: stores slow down by half once a loop touches more than
-about 256 pages (`bench_stores_across_pages`); the TLB only grows when flushed, and
-periodic flushing did not help the game's workload in matched measurements. Interactive play therefore runs at about
-half speed during races (realtime pacing slows the game rather than skipping time);
-**interactive playability at full speed is not achieved** at the default CPU profile
-on this host.
+How the speed is made up: in the race the game is idle (waiting for vertical blank)
+about 40 % of guest time, which unthrottled runs skip. The busy part runs at about
+0.73× realtime in the fast host state and 0.41× in the slow one. Realtime pacing
+recovers lag during idle gaps, so play keeps realtime as long as busy-phase speed
+stays above the game's busy fraction (about 0.6); this holds in the fast state on
+this host and fails in the slow one, where the player runs in slow motion.
+Longer busy stretches, such as loading, always run slower than realtime; realtime
+pacing drops lag beyond 100 ms rather than fast-forwarding afterwards (reported as
+`pacing.dropped_ns`). **Interactive play is close to, but not reliably at, full
+speed on this host.**
+
+Host profile of driving (fast state): about 80 % inside Unicorn (generated code,
+softfloat x87 helpers, the stop check at each block start, indirect-jump lookups),
+about 10 % in Direct3D translation and frame submission, the rest in API dispatch.
+The vendored Unicorn carries two patches (`vendor/README.md`) that keep guest stores
+on the fast path and drop a helper call after every memory access; together with a
+plain C instruction-counting hook they took this benchmark from 0.53× to 1.21×.
+The remaining large lever is the software TLB: stores across more than about 256
+pages run at a seventh of the speed of stores within a few pages
+(`bench_stores_across_pages`); a larger initial TLB did not help the game.
 
 Micro-benchmarks (`cargo test --release -p drydock-core --test bench -- --ignored
---nocapture`): tight integer loop ≈ 386 MIPS, API trap round trip ≈ 0.37 µs,
-call/ret with stores ≈ 104 MIPS.
+--nocapture`): tight integer loop ≈ 1350 MIPS, call/ret with stores ≈ 590 MIPS, API
+trap round trip ≈ 0.46 µs.
 
-Savepoints in a race: create 53 ms, restore 26 ms; disk checkpoint 13–24 MB written in
-0.38 s and restored in 0.15 s.
+Savepoints in a race: create 53 ms, restore 26 ms; disk checkpoint 13–24 MB written
+in 0.38 s and restored in 0.15 s.
+
+Linux (aarch64 container on the same machine, Lavapipe software Vulkan): `drive1`
+headless ran at 0.57× (before the Unicorn patches) with the same guest instruction
+and frame counts as on macOS; loading-screen frames were pixel-identical, rasterized
+race frames differ between Lavapipe and the Apple GPU.
 
 ## Open items
 
-1. Interactive speed in races (see Performance): moving draw translation and frame
-   submission to a render thread, cheaper per-block instruction counting, and
-   reducing Unicorn's per-access overhead are the candidates.
+1. Interactive speed (see Performance): busy-phase speed needs more headroom.
+   Candidates: Unicorn's software-TLB behaviour on large working sets, the per-block
+   stop-check helper, moving Direct3D translation and frame submission to a render
+   thread.
 2. Video for Windows (AVIFile, MCIWnd) and an Indeo 5 decoder for the intro movie.
 3. DirectMusic segments and DLS synthesis; CD-ROM drive mapping for CD audio.
-4. Linux headless verification, including Lavapipe; CI.
+4. CI has not run yet (the workflow is untested); Linux verification so far is a
+   local aarch64 container.
 5. Licence compatibility of Apache-2.0-only dependencies with GPL-2.0-only Unicorn
    for binary distribution (see THIRD_PARTY_NOTICES.md).
 6. Child processes.

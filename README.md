@@ -92,8 +92,8 @@ drydock run --mode headless --software-gpu --gpu-backend vulkan --exe app.exe --
 
 `--software-gpu` requests wgpu's fallback adapter; if none exists the run stops with
 an error naming the missing adapter rather than continuing without rendering. The
-adapter actually used is recorded in `provenance.json`. This configuration has not
-been tested yet (see [docs/status.md](docs/status.md)); software rendering is much
+adapter actually used is recorded in `provenance.json`. This configuration has been
+tested in a Debian aarch64 container (`mesa-vulkan-drivers`); software rendering is
 slower than a GPU.
 
 ## Tested platforms
@@ -101,7 +101,8 @@ slower than a GPU.
 | Host | Status |
 | --- | --- |
 | macOS 26 on Apple Silicon (M5 Max), Metal | Developed and tested: interactive and headless |
-| Linux x86-64 / aarch64, Vulkan or Lavapipe | Expected to build; untested |
+| Linux aarch64 (Debian container), Lavapipe | Tested headless: all tests pass, retail workload runs with identical guest execution |
+| Linux x86-64 | Expected to work like aarch64; untested |
 | Windows | Untested |
 
 ## Tests
@@ -127,6 +128,7 @@ GPU tests skip with a message when no adapter is available.
 
 Drydock links the Unicorn engine, which is licensed GPL-2.0-only; Drydock is
 therefore distributed under the GNU General Public License version 2 only (see
-[LICENSE](LICENSE)). Some transitive dependencies are Apache-2.0-only, which raises a
+[LICENSE](LICENSE)). Unicorn 2.1.5 is vendored under `vendor/` with one documented
+performance patch ([vendor/README.md](vendor/README.md)). Some transitive dependencies are Apache-2.0-only, which raises a
 compatibility question for binary distribution; see
 [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md).
