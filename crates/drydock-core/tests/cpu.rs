@@ -250,3 +250,22 @@ fn stack_is_32_bit_after_segment_loads() {
     assert_eq!(m.cpu.reg(Reg::EAX), 0x1234_5678);
     assert_eq!(m.cpu.esp(), STACK - 16);
 }
+
+/// Documents how repeated string instructions are counted: Unicorn re-enters the
+/// block holding a `rep` instruction once per iteration and once more when the
+/// count is exhausted, so `rep movsb` with ECX=100 counts 101 instructions.
+#[test]
+fn rep_string_instructions_count_per_iteration() {
+    let code = asm(|a| {
+        a.mov(esi, STACK - 0x8000).unwrap();
+        a.mov(edi, STACK - 0x4000).unwrap();
+        a.mov(ecx, 100).unwrap();
+        a.rep().movsb().unwrap();
+        a.int(0x2e).unwrap();
+    });
+    let mut m = machine(&code);
+    assert!(matches!(m.run(), Stop::ApiTrap { .. }));
+    assert_eq!(m.cpu.reg(Reg::ECX), 0);
+    let n = m.cpu.state().insns;
+    assert_eq!(n, 3 + 101 + 1, "insns={n}");
+}
