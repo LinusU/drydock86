@@ -292,6 +292,7 @@ pub fn report(d: &crate::driver::Driver, stop: &RunStop) -> serde_json::Value {
         "api_top": top_apis(s),
         "api_calls": s.diag.api_counts.values().sum::<u64>(),
         "run_stats": s.stats,
+        "renderer": s.host.renderer.as_ref().map(|r| r.stats),
         "jit": {
             "blocks": s.cpu.state().blocks,
             "map_ops": s.cpu.state().map_ops,
