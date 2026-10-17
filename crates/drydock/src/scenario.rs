@@ -168,163 +168,187 @@ fn advance(d: &mut Driver, dt: u64) -> Option<RunStop> {
     }
 }
 
+/// State that persists across the steps of one run (or one protocol session).
+#[derive(Default)]
+pub struct Ctx {
+    pub savepoints: std::collections::HashMap<String, Checkpoint>,
+}
+
+pub enum StepOutcome {
+    Continue,
+    Failed(String),
+    Stopped(RunStop),
+}
+
+/// Execute one step. Observations it produces are appended to `log`.
+pub fn step(d: &mut Driver, ctx: &mut Ctx, step: &Step, artifacts: &Path, log: &mut Vec<serde_json::Value>) -> Result<StepOutcome> {
+    let stop = match step {
+        Step::Run { run } => advance(d, secs(*run)),
+        Step::Key { key, mods, hold } => {
+            let now = d.s.clock.now_ns();
+            let hold = secs(hold.unwrap_or(0.06));
+            let mut mvks = Vec::new();
+            for m in mods {
+                let v = vk(m)?;
+                d.s.key(v, true, now);
+                mvks.push(v);
+            }
+            let k = vk(key)?;
+            d.s.tap_key(k, now + 10_000_000, hold);
+            for v in mvks.iter().rev() {
+                d.s.key(*v, false, now + 20_000_000 + hold);
+            }
+            advance(d, hold + 60_000_000)
+        }
+        Step::KeyDown { key_down } => {
+            let now = d.s.clock.now_ns();
+            d.s.key(vk(key_down)?, true, now);
+            advance(d, 1_000_000)
+        }
+        Step::KeyUp { key_up } => {
+            let now = d.s.clock.now_ns();
+            d.s.key(vk(key_up)?, false, now);
+            advance(d, 1_000_000)
+        }
+        Step::Type { r#type } => {
+            let mut now = d.s.clock.now_ns();
+            for c in r#type.chars() {
+                let up = c.to_ascii_uppercase();
+                let shift = c.is_ascii_uppercase() || "!@#$%^&*()_+{}|:\"<>?~".contains(c);
+                let k = match up {
+                    ' ' => 0x20,
+                    '\n' => 0x0d,
+                    c if c.is_ascii_alphanumeric() => c as u8,
+                    _ => bail!("cannot type {c:?}"),
+                };
+                if shift {
+                    d.s.key(0xa0, true, now);
+                }
+                d.s.tap_key(k, now + 5_000_000, 40_000_000);
+                if shift {
+                    d.s.key(0xa0, false, now + 50_000_000);
+                }
+                now += 80_000_000;
+            }
+            let dt = now - d.s.clock.now_ns() + 20_000_000;
+            advance(d, dt)
+        }
+        Step::Click { click, button } => {
+            let b = match button.as_deref() {
+                Some("right") => 1,
+                Some("middle") => 2,
+                _ => 0,
+            };
+            let now = d.s.clock.now_ns();
+            let inp = &mut d.s.user.input;
+            inp.schedule(now, InputEvent::MouseMove { x: click[0], y: click[1] });
+            inp.schedule(now + 10_000_000, InputEvent::MouseButton { button: b, down: true });
+            inp.schedule(now + 70_000_000, InputEvent::MouseButton { button: b, down: false });
+            advance(d, 120_000_000)
+        }
+        Step::MouseMove { mouse_move } => {
+            let now = d.s.clock.now_ns();
+            d.s.user.input.schedule(now, InputEvent::MouseMove { x: mouse_move[0], y: mouse_move[1] });
+            advance(d, 10_000_000)
+        }
+        Step::MouseRel { mouse_rel } => {
+            let now = d.s.clock.now_ns();
+            d.s.user.input.schedule(now, InputEvent::MouseRel { dx: mouse_rel[0], dy: mouse_rel[1] });
+            advance(d, 10_000_000)
+        }
+        Step::Screenshot { screenshot } => {
+            let path = artifacts.join(screenshot);
+            if let Some((w, h, px)) = d.s.capture_front() {
+                std::fs::write(&path, drydock_win32::observe::encode_png(w, h, &px))?;
+                log.push(serde_json::json!({ "screenshot": path, "size": [w, h] }));
+            }
+            None
+        }
+        Step::WaitFor { wait_for, timeout } => {
+            let deadline = d.s.clock.now_ns() + secs(*timeout);
+            let mut stop = None;
+            loop {
+                if wait_for.check(d) {
+                    break;
+                }
+                if d.s.clock.now_ns() >= deadline {
+                    return Ok(StepOutcome::Failed("wait_for timed out".into()));
+                }
+                if let Some(s) = advance(d, 10_000_000) {
+                    stop = Some(s);
+                    break;
+                }
+            }
+            stop
+        }
+        Step::Assert { assert } => {
+            if !assert.check(d) {
+                return Ok(StepOutcome::Failed("assertion failed".into()));
+            }
+            None
+        }
+        Step::AnswerDialog { answer_dialog } => {
+            if !d.s.answer_dialog(*answer_dialog) {
+                return Ok(StepOutcome::Failed("no pending message box".into()));
+            }
+            advance(d, 1_000_000)
+        }
+        Step::ReleaseAll { .. } => {
+            let now = d.s.clock.now_ns();
+            d.s.user.input.release_all(now);
+            advance(d, 1_000_000)
+        }
+        Step::Savepoint { savepoint } => {
+            let t0 = std::time::Instant::now();
+            ctx.savepoints.insert(savepoint.clone(), d.s.checkpoint(savepoint));
+            log.push(serde_json::json!({ "savepoint": savepoint, "host_ms": t0.elapsed().as_secs_f64() * 1e3 }));
+            None
+        }
+        Step::Save { save } => {
+            let t0 = std::time::Instant::now();
+            let path = artifacts.join(save);
+            let cp = d.s.checkpoint(save);
+            cp.write_to(&path).map_err(anyhow::Error::msg)?;
+            let bytes = std::fs::metadata(&path).map(|m| m.len()).unwrap_or(0);
+            log.push(serde_json::json!({ "saved": path, "bytes": bytes, "host_ms": t0.elapsed().as_secs_f64() * 1e3 }));
+            None
+        }
+        Step::Restore { restore } => {
+            let t0 = std::time::Instant::now();
+            let cp = match ctx.savepoints.get(restore) {
+                Some(cp) => cp.clone(),
+                None => Checkpoint::read_from(&artifacts.join(restore)).map_err(anyhow::Error::msg)?,
+            };
+            d.s.restore(&cp, true).map_err(anyhow::Error::msg)?;
+            d.reanchor();
+            log.push(serde_json::json!({ "restored": restore, "t": cp.info.virtual_ns as f64 / 1e9, "host_ms": t0.elapsed().as_secs_f64() * 1e3 }));
+            None
+        }
+        Step::Note { .. } => None,
+    };
+    Ok(match stop {
+        Some(s) => StepOutcome::Stopped(s),
+        None => StepOutcome::Continue,
+    })
+}
+
 pub fn run(d: &mut Driver, sc: &Scenario, artifacts: &Path) -> Result<Outcome> {
     let mut log = Vec::new();
-    let mut savepoints: std::collections::HashMap<String, Checkpoint> = Default::default();
-    for (i, step) in sc.steps.iter().enumerate() {
+    let mut ctx = Ctx::default();
+    for (i, st) in sc.steps.iter().enumerate() {
         let t = d.s.clock.now_ns() as f64 / 1e9;
-        log.push(serde_json::json!({ "step": i, "t": t, "do": step }));
-        let stop = match step {
-            Step::Run { run } => advance(d, secs(*run)),
-            Step::Key { key, mods, hold } => {
-                let now = d.s.clock.now_ns();
-                let hold = secs(hold.unwrap_or(0.06));
-                let mut mvks = Vec::new();
-                for m in mods {
-                    let v = vk(m)?;
-                    d.s.key(v, true, now);
-                    mvks.push(v);
-                }
-                let k = vk(key)?;
-                d.s.tap_key(k, now + 10_000_000, hold);
-                for v in mvks.iter().rev() {
-                    d.s.key(*v, false, now + 20_000_000 + hold);
-                }
-                advance(d, hold + 60_000_000)
+        log.push(serde_json::json!({ "step": i, "t": t, "do": st }));
+        match step(d, &mut ctx, st, artifacts, &mut log)? {
+            StepOutcome::Continue => {}
+            StepOutcome::Failed(reason) => {
+                log.push(serde_json::json!({ "failed": i, "reason": reason }));
+                return Ok(Outcome { ok: false, log, stop: None });
             }
-            Step::KeyDown { key_down } => {
-                let now = d.s.clock.now_ns();
-                d.s.key(vk(key_down)?, true, now);
-                advance(d, 1_000_000)
+            StepOutcome::Stopped(stop) => {
+                let ok = matches!(stop, RunStop::Exited { .. }) && i + 1 == sc.steps.len();
+                log.push(serde_json::json!({ "stopped": stop, "at_step": i }));
+                return Ok(Outcome { ok, log, stop: Some(stop) });
             }
-            Step::KeyUp { key_up } => {
-                let now = d.s.clock.now_ns();
-                d.s.key(vk(key_up)?, false, now);
-                advance(d, 1_000_000)
-            }
-            Step::Type { r#type } => {
-                let mut now = d.s.clock.now_ns();
-                for c in r#type.chars() {
-                    let up = c.to_ascii_uppercase();
-                    let shift = c.is_ascii_uppercase() || "!@#$%^&*()_+{}|:\"<>?~".contains(c);
-                    let k = match up {
-                        ' ' => 0x20,
-                        '\n' => 0x0d,
-                        c if c.is_ascii_alphanumeric() => c as u8,
-                        _ => bail!("cannot type {c:?}"),
-                    };
-                    if shift {
-                        d.s.key(0xa0, true, now);
-                    }
-                    d.s.tap_key(k, now + 5_000_000, 40_000_000);
-                    if shift {
-                        d.s.key(0xa0, false, now + 50_000_000);
-                    }
-                    now += 80_000_000;
-                }
-                let dt = now - d.s.clock.now_ns() + 20_000_000;
-                advance(d, dt)
-            }
-            Step::Click { click, button } => {
-                let b = match button.as_deref() {
-                    Some("right") => 1,
-                    Some("middle") => 2,
-                    _ => 0,
-                };
-                let now = d.s.clock.now_ns();
-                let inp = &mut d.s.user.input;
-                inp.schedule(now, InputEvent::MouseMove { x: click[0], y: click[1] });
-                inp.schedule(now + 10_000_000, InputEvent::MouseButton { button: b, down: true });
-                inp.schedule(now + 70_000_000, InputEvent::MouseButton { button: b, down: false });
-                advance(d, 120_000_000)
-            }
-            Step::MouseMove { mouse_move } => {
-                let now = d.s.clock.now_ns();
-                d.s.user.input.schedule(now, InputEvent::MouseMove { x: mouse_move[0], y: mouse_move[1] });
-                advance(d, 10_000_000)
-            }
-            Step::MouseRel { mouse_rel } => {
-                let now = d.s.clock.now_ns();
-                d.s.user.input.schedule(now, InputEvent::MouseRel { dx: mouse_rel[0], dy: mouse_rel[1] });
-                advance(d, 10_000_000)
-            }
-            Step::Screenshot { screenshot } => {
-                let path = artifacts.join(screenshot);
-                if let Some((w, h, px)) = d.s.capture_front() {
-                    std::fs::write(&path, drydock_win32::observe::encode_png(w, h, &px))?;
-                    log.push(serde_json::json!({ "screenshot": path, "size": [w, h] }));
-                }
-                None
-            }
-            Step::WaitFor { wait_for, timeout } => {
-                let deadline = d.s.clock.now_ns() + secs(*timeout);
-                let mut stop = None;
-                loop {
-                    if wait_for.check(d) {
-                        break;
-                    }
-                    if d.s.clock.now_ns() >= deadline {
-                        log.push(serde_json::json!({ "failed": i, "reason": "wait_for timed out" }));
-                        return Ok(Outcome { ok: false, log, stop: None });
-                    }
-                    if let Some(s) = advance(d, 10_000_000) {
-                        stop = Some(s);
-                        break;
-                    }
-                }
-                stop
-            }
-            Step::Assert { assert } => {
-                if !assert.check(d) {
-                    log.push(serde_json::json!({ "failed": i, "reason": "assertion failed" }));
-                    return Ok(Outcome { ok: false, log, stop: None });
-                }
-                None
-            }
-            Step::AnswerDialog { answer_dialog } => {
-                if !d.s.answer_dialog(*answer_dialog) {
-                    log.push(serde_json::json!({ "failed": i, "reason": "no pending message box" }));
-                    return Ok(Outcome { ok: false, log, stop: None });
-                }
-                advance(d, 1_000_000)
-            }
-            Step::ReleaseAll { .. } => {
-                let now = d.s.clock.now_ns();
-                d.s.user.input.release_all(now);
-                advance(d, 1_000_000)
-            }
-            Step::Savepoint { savepoint } => {
-                let t0 = std::time::Instant::now();
-                savepoints.insert(savepoint.clone(), d.s.checkpoint(savepoint));
-                log.push(serde_json::json!({ "savepoint": savepoint, "host_ms": t0.elapsed().as_secs_f64() * 1e3 }));
-                None
-            }
-            Step::Save { save } => {
-                let t0 = std::time::Instant::now();
-                let path = artifacts.join(save);
-                let cp = d.s.checkpoint(save);
-                cp.write_to(&path).map_err(anyhow::Error::msg)?;
-                let bytes = std::fs::metadata(&path).map(|m| m.len()).unwrap_or(0);
-                log.push(serde_json::json!({ "saved": path, "bytes": bytes, "host_ms": t0.elapsed().as_secs_f64() * 1e3 }));
-                None
-            }
-            Step::Restore { restore } => {
-                let t0 = std::time::Instant::now();
-                let cp = match savepoints.get(restore) {
-                    Some(cp) => cp.clone(),
-                    None => Checkpoint::read_from(&artifacts.join(restore)).map_err(anyhow::Error::msg)?,
-                };
-                d.s.restore(&cp, true).map_err(anyhow::Error::msg)?;
-                d.reanchor();
-                log.push(serde_json::json!({ "restored": restore, "t": cp.info.virtual_ns as f64 / 1e9, "host_ms": t0.elapsed().as_secs_f64() * 1e3 }));
-                None
-            }
-            Step::Note { .. } => None,
-        };
-        if let Some(stop) = stop {
-            let ok = matches!(stop, RunStop::Exited { .. }) && i + 1 == sc.steps.len();
-            log.push(serde_json::json!({ "stopped": stop, "at_step": i }));
-            return Ok(Outcome { ok, log, stop: Some(stop) });
         }
     }
     Ok(Outcome { ok: true, log, stop: None })
