@@ -7,6 +7,7 @@ pub mod kernel32;
 pub mod kernel32_file;
 pub mod kernel32_nls;
 pub mod misc;
+pub mod msvfw32;
 pub mod user32;
 pub mod winmm;
 
@@ -41,6 +42,11 @@ pub static BUILTINS: &[BuiltinDll] = &[
         name: "RICHED32.DLL",
         parts: &[dialog::RICHED32_EXPORTS],
         on_load: Some(dialog::register_richedit),
+    },
+    BuiltinDll {
+        name: "MSVFW32.DLL",
+        parts: &[msvfw32::MSVFW32_EXPORTS],
+        on_load: Some(msvfw32::on_load),
     },
     dll!("OLE32.DLL", crate::com::OLE32_EXPORTS),
     dll!("DDRAW.DLL", crate::com::DDRAW_EXPORTS),

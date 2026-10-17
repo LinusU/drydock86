@@ -61,6 +61,8 @@ pub struct Checkpoint {
     gdi: crate::dll::gdi32::GdiState,
     display: crate::surface::Display,
     winmm: crate::dll::winmm::MmState,
+    #[serde(default)]
+    vfw: crate::dll::msvfw32::VfwState,
     com: crate::com::ComState,
     diag: crate::diag::Diagnostics,
     cb_bufs: Vec<u32>,
@@ -165,6 +167,7 @@ impl Session {
             gdi: self.gdi.clone(),
             display: self.display.clone(),
             winmm: self.winmm.clone(),
+            vfw: self.vfw.clone(),
             com: self.com.clone(),
             diag: self.diag.clone(),
             cb_bufs: self.cb_bufs.clone(),
@@ -209,6 +212,7 @@ impl Session {
         self.gdi = cp.gdi.clone();
         self.display = cp.display.clone();
         self.winmm = cp.winmm.clone();
+        self.vfw = cp.vfw.clone();
         self.com = cp.com.clone();
         self.diag = cp.diag.clone();
         self.cb_bufs = cp.cb_bufs.clone();

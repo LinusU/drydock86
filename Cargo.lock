@@ -779,6 +779,7 @@ dependencies = [
  "drydock-core",
  "drydock-fixtures",
  "drydock-gfx",
+ "drydock-media",
  "flate2",
  "fontdue",
  "hex",

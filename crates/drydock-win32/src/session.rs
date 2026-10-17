@@ -199,6 +199,7 @@ pub struct Session {
     pub gdi: crate::dll::gdi32::GdiState,
     pub display: crate::surface::Display,
     pub winmm: crate::dll::winmm::MmState,
+    pub vfw: crate::dll::msvfw32::VfwState,
     pub com: crate::com::ComState,
     pub diag: Diagnostics,
     pub host: Host,
@@ -245,6 +246,7 @@ impl Session {
             gdi: Default::default(),
             display: Default::default(),
             winmm: Default::default(),
+            vfw: Default::default(),
             com: Default::default(),
             diag: Diagnostics::default(),
             host: Host::default(),
@@ -806,6 +808,7 @@ impl Session {
             }
         }
         take(crate::dll::winmm::next_event(self));
+        take(crate::dll::msvfw32::next_event(self));
         take(crate::dll::user32::next_event(self));
         take(crate::com::next_event(self));
         t
@@ -814,6 +817,7 @@ impl Session {
     /// Fire everything due at the current virtual time.
     fn service_events(&mut self) {
         crate::dll::winmm::service(self);
+        crate::dll::msvfw32::service(self);
         crate::dll::user32::service(self);
         crate::com::service(self);
     }

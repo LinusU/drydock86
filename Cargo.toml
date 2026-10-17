@@ -26,6 +26,7 @@ drydock-win32 = { path = "crates/drydock-win32" }
 drydock-gfx = { path = "crates/drydock-gfx" }
 drydock-audio = { path = "crates/drydock-audio" }
 drydock-fixtures = { path = "crates/drydock-fixtures" }
+drydock-media = { path = "crates/drydock-media" }
 
 [profile.dev]
 opt-level = 1

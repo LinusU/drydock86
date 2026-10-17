@@ -562,6 +562,7 @@ fn mix_to(s: &mut Session, now: u64) {
             pos += step;
         }
     }
+    crate::dll::msvfw32::mix_into(s, t0, drydock_audio::OUTPUT_RATE, &mut out);
     for v in out.iter_mut() {
         *v = v.clamp(-1.0, 1.0);
     }

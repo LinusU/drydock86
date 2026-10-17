@@ -380,7 +380,7 @@ pub fn nc_insets(style: u32, exstyle: u32, menu: bool) -> Rect {
     Rect::new(l, top, l, t)
 }
 
-fn client_from_window(w: &Window) -> Rect {
+pub fn client_from_window(w: &Window) -> Rect {
     let menu = w.style & WS_CHILD == 0 && w.id != 0;
     let i = nc_insets(w.style, w.exstyle, menu);
     Rect::new(
