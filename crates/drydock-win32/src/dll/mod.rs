@@ -47,4 +47,5 @@ pub static BUILTINS: &[BuiltinDll] = &[
     dll!("DINPUT.DLL", crate::com::DINPUT_EXPORTS),
     dll!("DSOUND.DLL", crate::com::DSOUND_EXPORTS),
     dll!("DPLAYX.DLL", crate::com::DPLAYX_EXPORTS),
+    dll!("DMUSIC.DLL", crate::com::dmusic::DMUSIC_EXPORTS),
 ];

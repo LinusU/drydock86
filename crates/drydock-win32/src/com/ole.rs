@@ -41,6 +41,9 @@ fn co_create_instance(s: &mut Session) -> ApiResult {
     if outer != 0 {
         return Ok(ApiRet::Ret(0x8004_0110));
     }
+    if let Some(r) = super::dmusic::create_via_com(s, &clsid, &iid, ppv) {
+        return r;
+    }
     match class_object(&clsid) {
         Some("DirectSound") => super::dsound::create_via_com(s, &iid, ppv),
         Some(other) => {

@@ -7,6 +7,7 @@
 
 pub mod d3d;
 pub mod ddraw;
+pub mod dmusic;
 pub mod dinput;
 pub mod dsound;
 pub mod ole;
@@ -107,6 +108,7 @@ pub enum ComKind {
     Ds3dListener(u32),
     Ds3dBuffer(u32),
     ClassFactory(Guid),
+    DMusic(dmusic::DmKind),
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -129,6 +131,7 @@ pub struct ComState {
     pub initialized: u32,
     pub ddraw: ddraw::DDrawGlobal,
     pub dsound: dsound::DSoundGlobal,
+    pub dmusic: dmusic::DMusicGlobal,
 }
 
 impl Session {
@@ -278,6 +281,7 @@ fn supported(kind: &ComKind) -> Vec<&'static IfaceDef> {
         ComKind::Ds3dListener(_) => vec![&dsound::IDIRECTSOUND3DLISTENER],
         ComKind::Ds3dBuffer(_) => vec![&dsound::IDIRECTSOUND3DBUFFER],
         ComKind::ClassFactory(_) => vec![&ole::ICLASSFACTORY],
+        ComKind::DMusic(k) => dmusic::supported(k),
     }
 }
 
