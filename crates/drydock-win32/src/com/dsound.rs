@@ -126,6 +126,10 @@ pub struct DSoundGlobal {
     pub speaker: u32,
     pub listener: Listener,
     pub pending_listener: Option<Listener>,
+    /// The mixer timeline runs (it starts with the first sound source and then keeps
+    /// rendering, silence included, so captured audio stays aligned with virtual time).
+    #[serde(default)]
+    pub timeline: bool,
     /// Virtual time up to which audio has been mixed.
     pub mixed_until: u64,
     pub out_frac: u64,
@@ -294,10 +298,34 @@ fn settle(s: &mut Session, id: u32, now: u64) {
     }
 }
 
+/// Whether the mixer renders a timeline: DirectSound exists or another source (a movie
+/// sound track) has started it.
+fn mixer_on(s: &Session) -> bool {
+    s.com.dsound.created || s.com.dsound.timeline
+}
+
+/// Renders the audio due up to now (before a source changes state mid-tick).
+pub fn mix_now(s: &mut Session) {
+    let now = s.clock.now_ns();
+    if s.host.audio.is_some() && mixer_on(s) && now > s.com.dsound.mixed_until {
+        mix_to(s, now);
+    }
+}
+
+/// Starts the mixer timeline at the current time if no source was active yet. Called
+/// by sources other than DirectSound before they start playing.
+pub fn start_mixer(s: &mut Session) {
+    if !mixer_on(s) {
+        s.com.dsound.mixed_until = s.clock.now_ns();
+        s.com.dsound.out_frac = 0;
+    }
+    s.com.dsound.timeline = true;
+}
+
 pub fn next_event(s: &Session) -> Option<u64> {
     let now = s.clock.now_ns();
     let mut t = buffer_due(s).filter(|x| *x > now);
-    if s.host.audio.is_some() && s.com.dsound.created {
+    if s.host.audio.is_some() && mixer_on(s) {
         let m = s.com.dsound.mixed_until + MIX_TICK_NS;
         if m > now {
             t = Some(t.map_or(m, |y| y.min(m)));
@@ -351,14 +379,14 @@ fn buffer_due(s: &Session) -> Option<u64> {
 }
 
 pub fn service(s: &mut Session) {
-    if !s.com.dsound.created {
-        return;
-    }
     let now = s.clock.now_ns();
     // Mix before settling: settling re-anchors each buffer's timeline at `now`, and
     // the mixer needs the anchors that were valid across the window it renders.
-    if s.host.audio.is_some() && now >= s.com.dsound.mixed_until + MIX_TICK_NS {
+    if s.host.audio.is_some() && mixer_on(s) && now >= s.com.dsound.mixed_until + MIX_TICK_NS {
         mix_to(s, now);
+    }
+    if !s.com.dsound.created {
+        return;
     }
     // Nothing can change before the next buffer event.
     if let Some(d) = s.com.dsound.due.get()
@@ -547,6 +575,7 @@ fn mix_to(s: &mut Session, now: u64) {
 
 fn ds_new(s: &mut Session) -> u32 {
     if !s.com.dsound.created {
+        let timeline_running = mixer_on(s);
         s.com.dsound.created = true;
         s.com.dsound.primary_fmt = Wfx {
             tag: 1,
@@ -555,7 +584,9 @@ fn ds_new(s: &mut Session) -> u32 {
             bits: 8,
             block: 2,
         };
-        s.com.dsound.mixed_until = s.clock.now_ns();
+        if !timeline_running {
+            s.com.dsound.mixed_until = s.clock.now_ns();
+        }
         s.com.dsound.speaker = 0x0004; // DSSPEAKER_STEREO
     }
     s.com_new(ComKind::DSound(DSoundObj {}))
