@@ -300,6 +300,10 @@ pub struct Renderer {
     uniform_align: u32,
     /// Lazily built pass that writes depth values from an R32Float texture.
     depth_upload: Option<(wgpu::RenderPipeline, wgpu::BindGroupLayout)>,
+    /// Vertex, index and uniform buffers reused across passes (grown on demand).
+    stream: [Option<wgpu::Buffer>; 3],
+    /// Bind group of the current uniform buffer.
+    ubo_group: Option<wgpu::BindGroup>,
     pub stats: RenderStats,
 }
 
@@ -461,6 +465,8 @@ impl Renderer {
             pending: None,
             uniform_align,
             depth_upload: None,
+            stream: [None, None, None],
+            ubo_group: None,
             stats: RenderStats::default(),
         }
     }
@@ -990,36 +996,53 @@ impl Renderer {
             return;
         }
         let d = self.gpu.device.clone();
-        use wgpu::util::DeviceExt;
-        let vb = d.create_buffer_init(&wgpu::util::BufferInitDescriptor {
-            label: Some("vertices"),
-            contents: bytemuck::cast_slice(&p.vertices),
-            usage: wgpu::BufferUsages::VERTEX,
-        });
-        let ib = d.create_buffer_init(&wgpu::util::BufferInitDescriptor {
-            label: Some("indices"),
-            contents: bytemuck::cast_slice(&p.indices),
-            usage: wgpu::BufferUsages::INDEX,
-        });
         let mut ubytes = p.uniforms.clone();
         ubytes.resize(ubytes.len() + std::mem::size_of::<Uniforms>(), 0);
-        let ub = d.create_buffer_init(&wgpu::util::BufferInitDescriptor {
-            label: Some("uniforms"),
-            contents: &ubytes,
-            usage: wgpu::BufferUsages::UNIFORM,
-        });
-        let ubg = d.create_bind_group(&wgpu::BindGroupDescriptor {
-            label: Some("ubo"),
-            layout: &self.ubo_layout,
-            entries: &[wgpu::BindGroupEntry {
-                binding: 0,
-                resource: wgpu::BindingResource::Buffer(wgpu::BufferBinding {
-                    buffer: &ub,
-                    offset: 0,
-                    size: wgpu::BufferSize::new(std::mem::size_of::<Uniforms>() as u64),
-                }),
-            }],
-        });
+        let vbytes: &[u8] = bytemuck::cast_slice(&p.vertices);
+        let ibytes: &[u8] = bytemuck::cast_slice(&p.indices);
+        let mut grown_ubo = false;
+        for (slot, (bytes, usage, label)) in [
+            (vbytes, wgpu::BufferUsages::VERTEX, "vertices"),
+            (ibytes, wgpu::BufferUsages::INDEX, "indices"),
+            (&ubytes[..], wgpu::BufferUsages::UNIFORM, "uniforms"),
+        ]
+        .into_iter()
+        .enumerate()
+        {
+            let need = (bytes.len() as u64).max(256).next_multiple_of(wgpu::COPY_BUFFER_ALIGNMENT);
+            if self.stream[slot].as_ref().is_none_or(|b| b.size() < need) {
+                self.stream[slot] = Some(d.create_buffer(&wgpu::BufferDescriptor {
+                    label: Some(label),
+                    size: need.next_power_of_two(),
+                    usage: usage | wgpu::BufferUsages::COPY_DST,
+                    mapped_at_creation: false,
+                }));
+                grown_ubo |= slot == 2;
+            }
+            // Queue writes are ordered after earlier submissions and before the next.
+            let buf = self.stream[slot].as_ref().unwrap();
+            let len = bytes.len() / 4 * 4;
+            if len > 0 {
+                self.gpu.queue.write_buffer(buf, 0, &bytes[..len]);
+            }
+        }
+        if grown_ubo || self.ubo_group.is_none() {
+            self.ubo_group = Some(d.create_bind_group(&wgpu::BindGroupDescriptor {
+                label: Some("ubo"),
+                layout: &self.ubo_layout,
+                entries: &[wgpu::BindGroupEntry {
+                    binding: 0,
+                    resource: wgpu::BindingResource::Buffer(wgpu::BufferBinding {
+                        buffer: self.stream[2].as_ref().unwrap(),
+                        offset: 0,
+                        size: wgpu::BufferSize::new(std::mem::size_of::<Uniforms>() as u64),
+                    }),
+                }],
+            }));
+        }
+        let vb = self.stream[0].clone().unwrap();
+        let ib = self.stream[1].clone().unwrap();
+        let ubg = self.ubo_group.clone().unwrap();
         // Bind groups per distinct texture/sampler combination.
         let mut groups: HashMap<([Option<u32>; 2], [SamplerKey; 2]), wgpu::BindGroup> = HashMap::new();
         let mut pipes = Vec::with_capacity(p.ops.len());
