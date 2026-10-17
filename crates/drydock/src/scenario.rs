@@ -337,7 +337,8 @@ pub fn run(d: &mut Driver, sc: &Scenario, artifacts: &Path) -> Result<Outcome> {
     let mut ctx = Ctx::default();
     for (i, st) in sc.steps.iter().enumerate() {
         let t = d.s.clock.now_ns() as f64 / 1e9;
-        log.push(serde_json::json!({ "step": i, "t": t, "do": st }));
+        let wall = d.wall_start.elapsed().as_secs_f64();
+        log.push(serde_json::json!({ "step": i, "t": t, "wall": wall, "do": st }));
         match step(d, &mut ctx, st, artifacts, &mut log)? {
             StepOutcome::Continue => {}
             StepOutcome::Failed(reason) => {
