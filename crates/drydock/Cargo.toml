@@ -1,0 +1,22 @@
+[package]
+name = "drydock"
+description = "Drydock: run, play, control and inspect original 32-bit Windows games"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[[bin]]
+name = "drydock"
+path = "src/main.rs"
+
+[dependencies]
+drydock-core.workspace = true
+drydock-win32.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+anyhow.workspace = true
+log.workspace = true
+sha2.workspace = true
+hex.workspace = true
+clap = { version = "4.5", features = ["derive"] }
+env_logger = "0.11"
