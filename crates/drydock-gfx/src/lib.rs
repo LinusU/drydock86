@@ -286,6 +286,33 @@ struct PendingPass {
     referenced: HashSet<u32>,
 }
 
+/// A color-target readback in flight.
+pub struct PendingReadback {
+    buf: wgpu::Buffer,
+    w: u32,
+    h: u32,
+    bpr: u32,
+    ready: Arc<std::sync::atomic::AtomicBool>,
+}
+
+impl PendingReadback {
+    /// RGBA8 contents once the GPU has delivered them.
+    pub fn try_take(&self) -> Option<(u32, u32, Vec<u8>)> {
+        if !self.ready.load(std::sync::atomic::Ordering::Acquire) {
+            return None;
+        }
+        let data = self.buf.slice(..).get_mapped_range();
+        let mut out = Vec::with_capacity((self.w * self.h * 4) as usize);
+        for y in 0..self.h {
+            let o = (y * self.bpr) as usize;
+            out.extend_from_slice(&data[o..o + (self.w * 4) as usize]);
+        }
+        drop(data);
+        self.buf.unmap();
+        Some((self.w, self.h, out))
+    }
+}
+
 pub struct Renderer {
     pub gpu: Arc<Gpu>,
     textures: HashMap<u32, Tex>,
@@ -771,6 +798,49 @@ impl Renderer {
         self.gpu.queue.submit([enc.finish()]);
         self.stats.uploads += 1;
         self.stats.upload_bytes += bytes.len() as u64;
+    }
+
+    /// Start reading back a color target without waiting for the GPU. The result
+    /// becomes available through [`PendingReadback::try_take`] after later polls.
+    pub fn readback_async(&mut self, key: u32) -> Option<PendingReadback> {
+        self.flush_if_referenced(key);
+        let t = self.textures.get(&key)?;
+        if t.format != TexFormat::Color {
+            return None;
+        }
+        let (w, h) = (t.w, t.h);
+        let bpr = (w * 4).div_ceil(256) * 256;
+        let buf = self.gpu.device.create_buffer(&wgpu::BufferDescriptor {
+            label: Some("readback-async"),
+            size: (bpr * h) as u64,
+            usage: wgpu::BufferUsages::COPY_DST | wgpu::BufferUsages::MAP_READ,
+            mapped_at_creation: false,
+        });
+        let mut enc = self.gpu.device.create_command_encoder(&Default::default());
+        enc.copy_texture_to_buffer(
+            t.tex.as_image_copy(),
+            wgpu::TexelCopyBufferInfo {
+                buffer: &buf,
+                layout: wgpu::TexelCopyBufferLayout { offset: 0, bytes_per_row: Some(bpr), rows_per_image: Some(h) },
+            },
+            wgpu::Extent3d { width: w, height: h, depth_or_array_layers: 1 },
+        );
+        self.gpu.queue.submit([enc.finish()]);
+        let ready = Arc::new(std::sync::atomic::AtomicBool::new(false));
+        let flag = ready.clone();
+        buf.slice(..).map_async(wgpu::MapMode::Read, move |r| {
+            if r.is_ok() {
+                flag.store(true, std::sync::atomic::Ordering::Release);
+            }
+        });
+        self.stats.readbacks += 1;
+        self.stats.readback_bytes += (w * h * 4) as u64;
+        Some(PendingReadback { buf, w, h, bpr, ready })
+    }
+
+    /// Advance asynchronous GPU work (map callbacks) without blocking.
+    pub fn poll(&self) {
+        let _ = self.gpu.device.poll(wgpu::PollType::Poll);
     }
 
     /// GPU copy between two color textures of the same size (e.g. for presentation).
