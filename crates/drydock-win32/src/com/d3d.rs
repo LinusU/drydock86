@@ -948,6 +948,14 @@ fn with_dev<T>(s: &mut Session, f: impl FnOnce(&mut Device) -> T) -> Result<T, A
     }
 }
 
+fn dev_ref(s: &Session) -> Result<&Device, ApiError> {
+    let id = dev_id(s)?;
+    match &s.com_obj(id).unwrap().kind {
+        ComKind::Device(d) => Ok(d),
+        _ => Err(ApiError::Fatal("not a Direct3D device".into())),
+    }
+}
+
 fn dev_clone(s: &Session) -> Result<Device, ApiError> {
     let id = dev_id(s)?;
     match &s.com_obj(id).unwrap().kind {
@@ -1228,7 +1236,10 @@ fn pipe_for(d: &Device, topology: gfx::Topology, has_depth: bool) -> gfx::PipeKe
 
 /// Issue a draw with vertices already decoded.
 fn submit_draw(s: &mut Session, prim: u32, fvf: u32, verts: Vec<gfx::Vertex>, indices: Option<Vec<u32>>) -> Result<u32, ApiError> {
-    let d = dev_clone(s)?;
+    let (dtarget, dtextures) = {
+        let d = dev_ref(s)?;
+        (d.target, [d.textures[0], d.textures[1]])
+    };
     let n = indices.as_ref().map(|i| i.len() as u32).unwrap_or(verts.len() as u32);
     let Some((topo, idx)) = primitive_indices(prim, n, indices.as_deref()) else {
         return Ok(D3DERR_INVALIDPRIMITIVETYPE);
@@ -1239,23 +1250,24 @@ fn submit_draw(s: &mut Session, prim: u32, fvf: u32, verts: Vec<gfx::Vertex>, in
     if idx.iter().any(|&i| i as usize >= verts.len()) {
         return Ok(D3DERR_INVALIDCALL);
     }
-    let Some(target) = s.surface_of_obj(d.target) else {
+    let Some(target) = s.surface_of_obj(dtarget) else {
         return Ok(D3DERR_INVALIDCALL);
     };
-    let depth = depth_of(s, d.target);
+    let depth = depth_of(s, dtarget);
     sync_target(s, target).map_err(ApiError::Fatal)?;
     if let Some(z) = depth {
         sync_target(s, z).map_err(ApiError::Fatal)?;
     }
-    let tex0 = if d.textures[0] != 0 { sync_texture(s, d.textures[0]) } else { None };
-    let tex1 = if d.textures[1] != 0 { sync_texture(s, d.textures[1]) } else { None };
+    let tex0 = if dtextures[0] != 0 { sync_texture(s, dtextures[0]) } else { None };
+    let tex1 = if dtextures[1] != 0 { sync_texture(s, dtextures[1]) } else { None };
     let (tw, th) = {
         let p = &s.display.surfaces[&target];
         (p.w as f32, p.h as f32)
     };
     let pre = fvf & 0xe == 0x4;
-    let u = build_uniforms(s, &d, pre, fvf, tw, th);
-    let pipe = pipe_for(&d, topo, depth.is_some());
+    let d = dev_ref(s)?;
+    let u = build_uniforms(s, d, pre, fvf, tw, th);
+    let pipe = pipe_for(d, topo, depth.is_some());
     // Transformed vertices carry absolute screen coordinates and depth; the
     // viewport only bounds them (through the scissor below).
     let vp = if pre {
@@ -1271,7 +1283,7 @@ fn submit_draw(s: &mut Session, prim: u32, fvf: u32, verts: Vec<gfx::Vertex>, in
         }
     };
     let scissor = [d.viewport.x, d.viewport.y, d.viewport.w, d.viewport.h];
-    let samplers = [sampler_for(&d, 0), sampler_for(&d, 1)];
+    let samplers = [sampler_for(d, 0), sampler_for(d, 1)];
     let r = s.renderer().map_err(ApiError::Fatal)?;
     r.draw(target, depth, pipe, &u, &verts, &idx, [tex0, tex1], samplers, vp, scissor);
     for id in [Some(target), depth].into_iter().flatten() {
