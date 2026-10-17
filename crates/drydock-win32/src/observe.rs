@@ -148,3 +148,40 @@ pub fn encode_png(w: u32, h: u32, rgba: &[u8]) -> Vec<u8> {
     }
     out
 }
+
+impl Session {
+    /// RGBA8 copy of the scanned-out image for a presentation window. Unlike
+    /// [`Session::capture_front`] this never alters guest memory or surface ownership.
+    pub fn present_rgba(&mut self) -> Option<(u32, u32, Vec<u8>)> {
+        let id = self.front_surface();
+        let sf = self.display.surfaces.get(&id)?.clone();
+        let (w, h, mut px) = if sf.gpu_dirty {
+            let r = self.host.renderer.as_mut()?;
+            r.readback(id)?
+        } else {
+            let pal = self.palette_of(id);
+            let data = self.mem.slice(sf.mem, sf.pitch * sf.h).ok()?;
+            let bpp = sf.fmt.bytes_pp() as usize;
+            let mut out = Vec::with_capacity((sf.w * sf.h * 4) as usize);
+            for y in 0..sf.h as usize {
+                let row = &data[y * sf.pitch as usize..];
+                for x in 0..sf.w as usize {
+                    let p = sf.fmt.decode(&row[x * bpp..x * bpp + bpp], pal.as_ref());
+                    out.extend([(p >> 16) as u8, (p >> 8) as u8, p as u8, 255]);
+                }
+            }
+            (sf.w, sf.h, out)
+        };
+        // Gamma ramp of the primary surface (identity unless the guest set one).
+        let g = &self.com.ddraw.gamma;
+        for p in px.chunks_exact_mut(4) {
+            if g.len() == 768 {
+                p[0] = (g[p[0] as usize] >> 8) as u8;
+                p[1] = (g[256 + p[1] as usize] >> 8) as u8;
+                p[2] = (g[512 + p[2] as usize] >> 8) as u8;
+            }
+            p[3] = 255;
+        }
+        Some((w, h, px))
+    }
+}
