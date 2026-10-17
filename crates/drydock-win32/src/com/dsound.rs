@@ -430,10 +430,9 @@ fn sample(data: &[u8], fmt: &Wfx, frame: usize, ch: usize) -> f32 {
 
 /// Mix all playing buffers from `mixed_until` to `now` into the attached sink.
 fn mix_to(s: &mut Session, now: u64) {
-    let g = s.com.dsound.clone();
-    let t0 = g.mixed_until.min(now);
+    let t0 = s.com.dsound.mixed_until.min(now);
     let span = now - t0;
-    let total = span as u128 * drydock_audio::OUTPUT_RATE as u128 + g.out_frac as u128;
+    let total = span as u128 * drydock_audio::OUTPUT_RATE as u128 + s.com.dsound.out_frac as u128;
     let n = (total / 1_000_000_000) as usize;
     s.com.dsound.out_frac = (total % 1_000_000_000) as u64;
     s.com.dsound.mixed_until = now;
@@ -441,40 +440,60 @@ fn mix_to(s: &mut Session, now: u64) {
         return;
     }
     let mut out = vec![0f32; n * 2];
-    for id in s.playing_ids() {
-        let Some(b) = s.dsbuf(id).cloned() else { continue };
-        if b.primary {
+    let rate = drydock_audio::OUTPUT_RATE as f64;
+    let g = &s.com.dsound;
+    for id in &g.playing {
+        let Some(b) = s.dsbuf(*id) else { continue };
+        if b.primary || !b.playing {
             continue;
         }
-        // The buffer may have started or stopped inside the window; sample positions
-        // follow the anchored timeline and are clipped to the playing interval.
-        let frames = b.frames().max(1) as f64;
-        let Ok(data) = s.mem.read_vec(b.mem, b.size) else { continue };
-        let (gl, gr, pitch) = spatial(&g, &b);
+        let (gl, gr, pitch) = spatial(g, b);
         if gl == 0.0 && gr == 0.0 {
             continue;
         }
-        let rate = drydock_audio::OUTPUT_RATE as f64;
-        for k in 0..n {
-            let t = t0 as f64 + k as f64 * 1e9 / rate;
-            if !b.playing && (t as u64) >= b.anchor_ns {
-                break;
+        let Ok(data) = s.mem.slice(b.mem, b.size) else { continue };
+        // Output samples before the buffer's anchor (it started inside this window)
+        // stay silent; positions then advance by a fixed step per output sample.
+        let k0 = if b.anchor_ns > t0 { ((b.anchor_ns - t0) as f64 * rate / 1e9).ceil() as usize } else { 0 };
+        if k0 >= n {
+            continue;
+        }
+        let fps = b.freq as f64 * pitch as f64;
+        let frames = b.frames().max(1) as f64;
+        let mut pos = b.anchor_frame as f64 + (t0 as f64 + k0 as f64 * 1e9 / rate - b.anchor_ns as f64) * fps / 1e9;
+        let step = fps / rate;
+        if b.looping {
+            pos %= frames;
+        }
+        let last = frames as usize - 1;
+        let stereo = b.fmt.channels == 2;
+        let block = b.fmt.block as usize;
+        let read = |i: usize, c: usize| -> f32 {
+            let o = i * block + if stereo { c * (b.fmt.bits as usize / 8) } else { 0 };
+            if b.fmt.bits == 8 {
+                (data.get(o).copied().unwrap_or(128) as f32 - 128.0) / 128.0
+            } else {
+                match data.get(o..o + 2) {
+                    Some(x) => i16::from_le_bytes([x[0], x[1]]) as f32 / 32768.0,
+                    None => 0.0,
+                }
             }
-            if (t as u64) < b.anchor_ns {
-                continue;
+        };
+        for k in k0..n {
+            if pos >= frames {
+                if !b.looping {
+                    break;
+                }
+                pos %= frames;
             }
-            let pos = b.anchor_frame as f64 + (t - b.anchor_ns as f64) * b.freq as f64 * pitch as f64 / 1e9;
-            if !b.looping && pos >= frames {
-                break;
-            }
-            let p = pos % frames;
-            let i0 = p.floor() as usize;
-            let i1 = if i0 + 1 >= frames as usize { if b.looping { 0 } else { i0 } } else { i0 + 1 };
-            let f = (p - i0 as f64) as f32;
-            let lv = sample(&data, &b.fmt, i0, 0) * (1.0 - f) + sample(&data, &b.fmt, i1, 0) * f;
-            let rv = sample(&data, &b.fmt, i0, 1) * (1.0 - f) + sample(&data, &b.fmt, i1, 1) * f;
-            out[k * 2] += lv * gl;
-            out[k * 2 + 1] += rv * gr;
+            let i0 = pos as usize;
+            let i1 = if i0 >= last { if b.looping { 0 } else { i0 } } else { i0 + 1 };
+            let f = (pos - i0 as f64) as f32;
+            let (l0, l1) = (read(i0, 0), read(i1, 0));
+            let (r0, r1) = if stereo { (read(i0, 1), read(i1, 1)) } else { (l0, l1) };
+            out[k * 2] += (l0 + (l1 - l0) * f) * gl;
+            out[k * 2 + 1] += (r0 + (r1 - r0) * f) * gr;
+            pos += step;
         }
     }
     for v in out.iter_mut() {
