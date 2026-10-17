@@ -28,10 +28,21 @@ pub struct Heap {
 }
 
 impl Heap {
+    fn segment_of(&self, addr: u32) -> Option<(u32, u32)> {
+        self.segments
+            .iter()
+            .copied()
+            .find(|&(b, l)| addr >= b && (addr as u64) < b as u64 + l as u64)
+    }
+
     fn insert_free(&mut self, mut start: u32, mut len: u32) {
+        // Coalescing never crosses segment boundaries: segments are separate regions
+        // even when they happen to be adjacent in the address space.
+        let seg = self.segment_of(start);
         // Coalesce with predecessor.
         if let Some((&ps, &pl)) = self.free.range(..start).next_back()
             && ps + pl == start
+            && self.segment_of(ps) == seg
         {
             self.free.remove(&ps);
             self.by_size.remove(&(pl, ps));
@@ -39,7 +50,9 @@ impl Heap {
             len += pl;
         }
         // Coalesce with successor.
-        if let Some(&nl) = self.free.get(&(start + len)) {
+        if let Some(&nl) = self.free.get(&(start + len))
+            && self.segment_of(start + len) == seg
+        {
             self.free.remove(&(start + len));
             self.by_size.remove(&(nl, start + len));
             len += nl;
@@ -236,6 +249,12 @@ mod tests {
         let d = hs.realloc(&mut mem, h, c, 5000, false, false).unwrap();
         assert_eq!(&mem.read_vec(d, 8).unwrap(), b"abcdefgh");
         assert_eq!(hs.heaps[&h].size_of(d), Some(5000));
+        // Allocations never straddle two segments, even adjacent ones.
+        let e = hs.alloc(&mut mem, h, 0xf_0000, false).unwrap();
+        let f = hs.alloc(&mut mem, h, 0x8_0000, false).unwrap();
+        for (p, n) in [(e, 0xf_0000u32), (f, 0x8_0000)] {
+            assert!(mem.slice(p, n).is_ok(), "block {p:#x}+{n:#x} spans regions");
+        }
         // Large allocations grow the heap with a new segment.
         let big = hs.alloc(&mut mem, h, 3 << 20, false).unwrap();
         assert!(mem.is_writable(big, 3 << 20));
