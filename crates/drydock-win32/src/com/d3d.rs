@@ -2170,9 +2170,9 @@ mod tests {
     use super::*;
     #[test]
     fn fvf_strides() {
-        assert_eq!(fvf_stride(0x1c4), 28); // XYZRHW|DIFFUSE|SPECULAR|TEX1
+        assert_eq!(fvf_stride(0x1c4), 32); // XYZRHW|DIFFUSE|SPECULAR|TEX1
         assert_eq!(fvf_stride(0x112), 32); // XYZ|NORMAL|TEX1
-        assert_eq!(fvf_stride(0x252), 32 + 8); // XYZ|NORMAL|DIFFUSE|TEX2
+        assert_eq!(fvf_stride(0x252), 44); // XYZ|NORMAL|DIFFUSE|TEX2
     }
     #[test]
     fn strip_and_fan_indices() {
