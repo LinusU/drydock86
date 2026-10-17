@@ -73,6 +73,20 @@ pub struct TraceEntry {
     pub insns: u64,
 }
 
+/// Instruction count of a translated block (`size == 0` marks an empty slot).
+#[derive(Clone, Copy, Default)]
+struct BlockEntry {
+    addr: u32,
+    size: u32,
+    insns: u32,
+}
+
+const BCACHE_BITS: u32 = 17;
+
+fn bcache_index(addr: u32) -> usize {
+    ((addr ^ (addr >> BCACHE_BITS)) & ((1 << BCACHE_BITS) - 1)) as usize
+}
+
 /// State touched from inside Unicorn hooks.
 pub struct HookState {
     pub stop: Option<Stop>,
@@ -80,7 +94,8 @@ pub struct HookState {
     pub insns: u64,
     /// Stop at the first block boundary where `insns >= insn_limit`.
     pub insn_limit: u64,
-    icache: FxHashMap<u32, (u32, u32)>,
+    /// Direct-mapped cache of instruction counts per translated block.
+    bcache: Vec<BlockEntry>,
     /// Bitset of 4 KiB pages that have held translated code since the last full flush.
     /// Writes elsewhere need no translation-cache invalidation.
     code_pages: Vec<u64>,
@@ -171,6 +186,43 @@ fn uc_err(e: uc_error) -> String {
     format!("{e:?}")
 }
 
+unsafe extern "C" fn block_cb(uc: *mut unicorn_engine::uc_engine, address: u64, size: u32, user: *mut c_void) {
+    let st = unsafe { &mut *(user as *mut HookState) };
+    // Unicorn checks for a stop request right after this hook, so a block that would
+    // exceed the budget is not entered and not counted.
+    if st.insns >= st.insn_limit {
+        if st.stop.is_none() {
+            st.stop = Some(Stop::Budget);
+        }
+        unsafe { unicorn_engine::uc_emu_stop(uc) };
+        return;
+    }
+    let addr = address as u32;
+    let slot = bcache_index(addr);
+    let e = st.bcache[slot];
+    let n = if e.addr == addr && e.size == size && size != 0 {
+        e.insns
+    } else {
+        let mut buf = vec![0u8; size as usize];
+        let ok = unsafe { unicorn_engine::uc_mem_read(uc, address, buf.as_mut_ptr() as *mut c_void, size as u64) };
+        let n = if ok == uc_error::OK { count_insns(&buf, addr) } else { 1 };
+        st.bcache[slot] = BlockEntry { addr, size, insns: n };
+        let last = addr.saturating_add(size.max(1) - 1);
+        for page in (addr >> 12)..=(last >> 12) {
+            st.code_pages[page as usize >> 6] |= 1 << (page & 63);
+        }
+        n
+    };
+    st.insns += n as u64;
+    st.blocks += 1;
+    if let Some(t) = st.trace.as_mut() {
+        if t.len() >= st.trace_cap {
+            t.pop_front();
+        }
+        t.push_back(TraceEntry { eip: addr, insns: st.insns });
+    }
+}
+
 unsafe extern "C" fn rdtsc_cb(uc: *mut unicorn_engine::uc_engine, user: *mut c_void) -> i32 {
     let st = unsafe { &*(user as *const HookState) };
     let tsc = (st.now_ns() as u128 * st.tsc_hz as u128 / 1_000_000_000u128) as u64;
@@ -200,7 +252,7 @@ impl Cpu {
             stop: None,
             insns: 0,
             insn_limit: u64::MAX,
-            icache: FxHashMap::default(),
+            bcache: vec![BlockEntry::default(); 1 << BCACHE_BITS],
             code_pages: vec![0; 1 << 14],
             breakpoints: FxHashMap::default(),
             skip_breakpoint: None,
@@ -218,50 +270,6 @@ impl Cpu {
         let mut uc = Unicorn::new_with_data(Arch::X86, Mode::MODE_32, hs).map_err(uc_err)?;
         uc.ctl_set_cpu_model(X86CpuModel::PENTIUM3 as i32).map_err(uc_err)?;
 
-        uc.add_block_hook(1, 0, |uc, addr, size| {
-            // Unicorn checks for a stop request right after this hook, so a block
-            // that would exceed the budget is not entered and not counted.
-            let st = uc.get_data_mut();
-            if st.insns >= st.insn_limit {
-                if st.stop.is_none() {
-                    st.stop = Some(Stop::Budget);
-                }
-                let _ = uc.emu_stop();
-                return;
-            }
-            let addr = addr as u32;
-            let n = match st.icache.get(&addr) {
-                Some(&(s, n)) if s == size => n,
-                _ => {
-                    let mut buf = vec![0u8; size as usize];
-                    let n = if uc.mem_read(addr as u64, &mut buf).is_ok() {
-                        count_insns(&buf, addr)
-                    } else {
-                        1
-                    };
-                    let st = uc.get_data_mut();
-                    st.icache.insert(addr, (size, n));
-                    let last = addr.saturating_add(size.max(1) - 1);
-                    for page in (addr >> 12)..=(last >> 12) {
-                        st.code_pages[page as usize >> 6] |= 1 << (page & 63);
-                    }
-                    n
-                }
-            };
-            let st = uc.get_data_mut();
-            st.insns += n as u64;
-            st.blocks += 1;
-            if let Some(t) = st.trace.as_mut() {
-                if t.len() >= st.trace_cap {
-                    t.pop_front();
-                }
-                t.push_back(TraceEntry {
-                    eip: addr,
-                    insns: st.insns,
-                });
-            }
-        })
-        .map_err(uc_err)?;
 
         uc.add_intr_hook(|uc, intno| {
             let eip = uc.reg_read(R::EIP).unwrap_or(0) as u32;
@@ -308,7 +316,30 @@ impl Cpu {
             fs_base: 0,
         };
         cpu.install_rdtsc_hook()?;
+        cpu.install_block_hook()?;
         Ok(cpu)
+    }
+
+    /// Count instructions per block. Registered as a plain C callback: this runs for
+    /// every executed block, and the generic Rust hook trampoline costs noticeably more.
+    fn install_block_hook(&mut self) -> Result<(), String> {
+        let user = self.uc.get_data_mut() as *mut HookState as *mut c_void;
+        let mut hh: unicorn_engine::uc_hook = 0;
+        let err = unsafe {
+            unicorn_engine::uc_hook_add(
+                self.uc.get_handle(),
+                &mut hh,
+                HookType::BLOCK.0 as i32,
+                block_cb as *mut c_void,
+                user,
+                1u64,
+                0u64,
+            )
+        };
+        if err != uc_error::OK {
+            return Err(format!("block hook: {err:?}"));
+        }
+        Ok(())
     }
 
     fn install_rdtsc_hook(&mut self) -> Result<(), String> {
@@ -435,11 +466,11 @@ impl Cpu {
             self.uc.get_data_mut().invalidations += 1;
             self.uc.ctl_remove_cache(a as u64, end).map_err(uc_err)?;
             let st = self.uc.get_data_mut();
-            if l == u32::MAX {
-                st.icache.clear();
-            } else if !st.icache.is_empty() {
-                // Drop cached instruction counts for blocks starting in the range.
-                st.icache.retain(|&k, _| (k as u64) < a as u64 || k as u64 >= end);
+            // Drop cached instruction counts for blocks starting in the range.
+            for e in st.bcache.iter_mut() {
+                if l == u32::MAX || (e.addr as u64 >= a as u64 && (e.addr as u64) < end) {
+                    *e = BlockEntry::default();
+                }
             }
         }
         Ok(())
@@ -786,7 +817,7 @@ impl Cpu {
     /// Flush every translated block (after restoring memory from a checkpoint).
     pub fn flush_all_code(&mut self) -> Result<(), String> {
         self.uc.ctl_flush_tb().map_err(uc_err)?;
-        self.uc.get_data_mut().icache.clear();
+        self.uc.get_data_mut().bcache.fill(BlockEntry::default());
         Ok(())
     }
 }
