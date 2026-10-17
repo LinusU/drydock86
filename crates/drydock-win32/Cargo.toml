@@ -1,0 +1,21 @@
+[package]
+name = "drydock-win32"
+description = "Drydock Win32/COM environment: session, loader, scheduler, system modules"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+drydock-core.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+thiserror.workspace = true
+log.workspace = true
+rustc-hash.workspace = true
+sha2.workspace = true
+hex.workspace = true
+fontdue = "0.9"
+png = "0.17"
+
+[dev-dependencies]
+drydock-fixtures.workspace = true

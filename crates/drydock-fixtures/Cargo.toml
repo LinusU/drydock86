@@ -1,0 +1,10 @@
+[package]
+name = "drydock-fixtures"
+description = "Generates small, self-authored PE32 test programs for Drydock's test suite"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+publish = false
+
+[dependencies]
+iced-x86 = { workspace = true, features = ["code_asm"] }
