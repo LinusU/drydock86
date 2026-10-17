@@ -38,6 +38,14 @@ pub struct Gpu {
     pub device: wgpu::Device,
     pub queue: wgpu::Queue,
     pub report: AdapterReport,
+    /// Uncaptured device errors (validation failures), oldest first.
+    pub errors: Arc<std::sync::Mutex<Vec<String>>>,
+}
+
+impl Gpu {
+    pub fn take_errors(&self) -> Vec<String> {
+        std::mem::take(&mut *self.errors.lock().unwrap())
+    }
 }
 
 impl Gpu {
@@ -78,6 +86,13 @@ impl Gpu {
             ..Default::default()
         }))
         .map_err(|e| format!("device creation failed on {}: {e}", info.name))?;
+        // Validation errors are emulator bugs: record them instead of aborting.
+        let errors: Arc<std::sync::Mutex<Vec<String>>> = Default::default();
+        let e2 = errors.clone();
+        device.on_uncaptured_error(Arc::new(move |e: wgpu::Error| {
+            log::error!("wgpu: {e}");
+            e2.lock().unwrap().push(e.to_string());
+        }));
         let report = AdapterReport {
             name: info.name.clone(),
             backend: format!("{:?}", info.backend),
@@ -93,6 +108,7 @@ impl Gpu {
             device,
             queue,
             report,
+            errors,
         }))
     }
 }

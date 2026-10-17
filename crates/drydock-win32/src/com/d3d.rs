@@ -265,8 +265,6 @@ fn sync_target(s: &mut Session, id: u32) -> Result<(), String> {
     if sf.cpu_dirty || !existed {
         if fmt == gfx::TexFormat::Depth {
             let z = depth_value_of(s, id);
-            s.renderer()?.clear(id, Some(id), [0, 0, 0, 0], None, None);
-            let _ = z;
             clear_depth_full(s, id, z)?;
         } else if let Some((w, h, px)) = decode_rgba(s, id) {
             s.renderer()?.upload(id, 0, w, h, &px);
@@ -359,6 +357,10 @@ pub fn surface_freed(s: &mut Session, id: u32) {
 pub fn flush(s: &mut Session) {
     if let Some(r) = s.host.renderer.as_mut() {
         r.flush();
+        let errs = r.gpu.take_errors();
+        if let Some(e) = errs.first() {
+            s.halt("gpu", format!("renderer validation error: {e}"), None);
+        }
     }
 }
 
