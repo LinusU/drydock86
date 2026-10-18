@@ -699,6 +699,7 @@ pub(super) fn create_device(
     for t in [1u32, 2, 3] {
         transforms.insert(t, IDENTITY);
     }
+    let legacy = v3.is_some();
     let dev = Device {
         ddraw: dd,
         target,
@@ -729,8 +730,10 @@ pub(super) fn create_device(
     s.com_addref(target);
     let id = s.com_new(ComKind::Device(Box::new(dev)));
     s.out_iface(pp, id, def)?;
-    // Direct3D switches the x87 unit to single precision unless asked to preserve it.
-    if s.com.ddraw.coop_flags & super::ddraw::DDSCL_FPUPRESERVE == 0 {
+    // Direct3D 7 switches the x87 unit to single precision unless asked to preserve it.
+    // Direct3D 6 devices leave it alone: games of that era convert colours with the
+    // 1.5 * 2^52 rounding trick, which needs the 53-bit precision the C runtime set.
+    if !legacy && s.com.ddraw.coop_flags & super::ddraw::DDSCL_FPUPRESERVE == 0 {
         let mut r = s.cpu.read_regs();
         r.fpcw &= !0x300;
         s.cpu.write_regs(&mut s.mem, &r).map_err(ApiError::Fatal)?;
