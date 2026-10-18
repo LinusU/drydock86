@@ -35,7 +35,9 @@ The binary is `target/release/drydock`.
 
 Point `--root` at the installation directory and `--exe` at the executable inside it.
 The installation is mounted read-only as `C:\GAME` (change with `--mount`); writes go
-to an in-memory overlay, which `--overlay <dir>` persists across runs.
+to an in-memory overlay, which `--overlay <dir>` persists across runs. An `--exe`
+outside `--root` (such as an unpacked copy of the executable) is mounted beside the
+installation under its file name.
 
 Interactive play (desktop window, realtime pacing, host audio and input):
 

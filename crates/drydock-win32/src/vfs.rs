@@ -669,7 +669,7 @@ impl Vfs {
                 }
             }
         }
-        // Mount points directly below p.
+        // Mount points directly below p (a mount may be a single file).
         for m in &self.mounts {
             if m.guest.drive == p.drive
                 && m.guest.comps.len() == p.comps.len() + 1
@@ -680,12 +680,20 @@ impl Vfs {
                     .all(|(a, b)| a.eq_ignore_ascii_case(b))
             {
                 let n = m.guest.comps.last().unwrap().clone();
+                let file_len = std::fs::metadata(&m.host)
+                    .ok()
+                    .filter(|md| md.is_file())
+                    .map(|md| md.len());
                 entries.insert(
                     n.to_uppercase(),
                     DirEntry {
                         name: n,
-                        attrs: FILE_ATTRIBUTE_DIRECTORY,
-                        size: 0,
+                        attrs: if file_len.is_some() {
+                            FILE_ATTRIBUTE_ARCHIVE
+                        } else {
+                            FILE_ATTRIBUTE_DIRECTORY
+                        },
+                        size: file_len.unwrap_or(0),
                         mtime: self.base_file_time,
                     },
                 );
@@ -906,6 +914,36 @@ mod tests {
         v.delete(&p).unwrap();
         assert!(v.attributes(&p).is_err());
         assert_eq!(v.list_dir(&normalize("C:\\", &cwd()).unwrap())[0].name, "Game");
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn single_file_mount() {
+        let dir = std::env::temp_dir().join(format!("drydock-vfs-file-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(dir.join("root")).unwrap();
+        std::fs::write(dir.join("root").join("a.txt"), b"a").unwrap();
+        std::fs::write(dir.join("extra.bin"), b"extra").unwrap();
+        let mut v = Vfs::new();
+        v.mount(normalize("C:\\Game", &cwd()).unwrap(), dir.join("root"));
+        v.mount(normalize("C:\\Game\\Extra.bin", &cwd()).unwrap(), dir.join("extra.bin"));
+        let p = normalize("C:\\GAME\\EXTRA.BIN", &cwd()).unwrap();
+        assert_eq!(v.attributes(&p).unwrap(), FILE_ATTRIBUTE_ARCHIVE);
+        let (mut f, _) = v.open(&p, true, false, Disposition::OpenExisting, 0).unwrap();
+        let mut b = [0u8; 16];
+        assert_eq!(v.read(&mut f, &mut b).unwrap(), 5);
+        let names: Vec<_> = v
+            .list_dir(&normalize("C:\\Game", &cwd()).unwrap())
+            .into_iter()
+            .map(|e| (e.name, e.attrs, e.size))
+            .collect();
+        assert_eq!(
+            names[2..],
+            [
+                ("a.txt".into(), FILE_ATTRIBUTE_ARCHIVE, 1),
+                ("Extra.bin".into(), FILE_ATTRIBUTE_ARCHIVE, 5)
+            ]
+        );
         let _ = std::fs::remove_dir_all(&dir);
     }
 }

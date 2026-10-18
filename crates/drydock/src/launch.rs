@@ -17,7 +17,8 @@ pub struct RunArgs {
     /// play (window) or headless.
     #[arg(long, value_enum, default_value_t = Mode::Headless)]
     pub mode: Mode,
-    /// Executable: a path relative to --root, or a host path inside it.
+    /// Executable: a path relative to --root, or a host path. An executable outside
+    /// --root is mounted read-only in the application directory under its file name.
     #[arg(long)]
     pub exe: PathBuf,
     /// Host directory mounted read-only as the application directory.
@@ -125,12 +126,22 @@ pub fn build_session(a: &RunArgs) -> Result<Session> {
     let exe_host = exe_host
         .canonicalize()
         .with_context(|| format!("exe {}", exe_host.display()))?;
-    let rel = exe_host.strip_prefix(&root).context("--exe must be inside --root")?;
-    let mut guest_exe = mount.clone();
-    for c in rel.components() {
-        guest_exe = guest_exe.join(&c.as_os_str().to_string_lossy());
-    }
     let mut vfs = Vfs::new();
+    let guest_exe = match exe_host.strip_prefix(&root) {
+        Ok(rel) => {
+            let mut guest_exe = mount.clone();
+            for c in rel.components() {
+                guest_exe = guest_exe.join(&c.as_os_str().to_string_lossy());
+            }
+            guest_exe
+        }
+        Err(_) => {
+            let name = exe_host.file_name().context("--exe has no file name")?;
+            let guest_exe = mount.join(&name.to_string_lossy());
+            vfs.mount(guest_exe.clone(), exe_host.clone());
+            guest_exe
+        }
+    };
     vfs.mount(mount, root);
     if let Some(o) = &a.overlay {
         std::fs::create_dir_all(o)?;
