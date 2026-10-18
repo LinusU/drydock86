@@ -5676,6 +5676,81 @@ int64_t floatx80_to_int64_round_to_zero(floatx80 a, float_status *status)
 }
 
 /*----------------------------------------------------------------------------
+| Drydock (0005): host-double fast paths for the common x87 case. With the
+| control word in 53-bit precision and round-to-nearest-even, an operation on
+| operands that are exactly representable as normal doubles (moderate
+| exponents) rounds to the same value as the host's double operation. Anything
+| else (zeros are fine; denormals, infinities, NaNs, wide mantissas, extreme
+| exponents, results that leave the double normal range) takes the original
+| softfloat path. The inexact flag is not raised on these paths: the x87 model
+| never exposes it to the guest (only the invalid flag is read, by the integer
+| conversions).
+*----------------------------------------------------------------------------*/
+#if !defined(__i386__)
+#define DRYDOCK_FX80_FAST 1
+
+/* Cleared by uc_drydock_set_fast_fp() so tests can compare both paths. */
+int drydock_fx80_fast_enabled = 1;
+
+static inline bool fx80_fast_ok(const float_status *status)
+{
+    return drydock_fx80_fast_enabled &&
+           status->floatx80_rounding_precision == 64 &&
+           status->float_rounding_mode == float_round_nearest_even;
+}
+
+static inline bool fx80_to_dbl(floatx80 a, double *out)
+{
+    uint64_t sig = a.low;
+    int e = a.high & 0x7fff;
+    uint64_t sign = (uint64_t)(a.high >> 15) << 63;
+    uint64_t bits;
+
+    if (sig & 0x7ff) {
+        return false;
+    }
+    if (e == 0) {
+        if (sig) {
+            return false;
+        }
+        bits = sign;
+    } else {
+        int ue = e - 0x3fff;
+        if (!(sig >> 63) || ue < -400 || ue > 400) {
+            return false;
+        }
+        bits = sign | ((uint64_t)(ue + 1023) << 52) | ((sig << 1) >> 12);
+    }
+    memcpy(out, &bits, sizeof(bits));
+    return true;
+}
+
+static inline bool dbl_to_fx80(double r, floatx80 *out)
+{
+    uint64_t bits;
+    int e;
+
+    memcpy(&bits, &r, sizeof(bits));
+    e = (bits >> 52) & 0x7ff;
+    if (e == 0) {
+        if (bits << 1) {
+            return false;
+        }
+        *out = packFloatx80(bits >> 63, 0, 0);
+        return true;
+    }
+    if (e == 0x7ff) {
+        return false;
+    }
+    *out = packFloatx80(bits >> 63, e - 1023 + 0x3fff,
+                        UINT64_C(0x8000000000000000) |
+                        ((bits & UINT64_C(0xfffffffffffff)) << 11));
+    return true;
+}
+#endif
+
+
+/*----------------------------------------------------------------------------
 | Returns the result of converting the extended double-precision floating-
 | point value `a' to the single-precision floating-point format.  The
 | conversion is performed according to the IEC/IEEE Standard for Binary
@@ -5688,6 +5763,20 @@ float32 floatx80_to_float32(floatx80 a, float_status *status)
     int32_t aExp;
     uint64_t aSig;
 
+#ifdef DRYDOCK_FX80_FAST
+    if (fx80_fast_ok(status)) {
+        double d;
+        if (fx80_to_dbl(a, &d)) {
+            double ad = __builtin_fabs(d);
+            if (ad == 0 || (ad >= 0x1p-100 && ad <= 0x1p100)) {
+                float f = (float)d;
+                uint32_t fb;
+                memcpy(&fb, &f, sizeof(fb));
+                return fb;
+            }
+        }
+    }
+#endif
     if (floatx80_invalid_encoding(a)) {
         float_raise(float_flag_invalid, status);
         return float32_default_nan(status);
@@ -6034,6 +6123,18 @@ floatx80 floatx80_add(floatx80 a, floatx80 b, float_status *status)
 {
     flag aSign, bSign;
 
+#ifdef DRYDOCK_FX80_FAST
+    if (fx80_fast_ok(status)) {
+        double x, y;
+        if (fx80_to_dbl(a, &x) && fx80_to_dbl(b, &y)) {
+            double z = x + y;
+            floatx80 r;
+            if (dbl_to_fx80(z, &r)) {
+                return r;
+            }
+        }
+    }
+#endif
     if (floatx80_invalid_encoding(a) || floatx80_invalid_encoding(b)) {
         float_raise(float_flag_invalid, status);
         return floatx80_default_nan(status);
@@ -6059,6 +6160,18 @@ floatx80 floatx80_sub(floatx80 a, floatx80 b, float_status *status)
 {
     flag aSign, bSign;
 
+#ifdef DRYDOCK_FX80_FAST
+    if (fx80_fast_ok(status)) {
+        double x, y;
+        if (fx80_to_dbl(a, &x) && fx80_to_dbl(b, &y)) {
+            double z = x - y;
+            floatx80 r;
+            if (dbl_to_fx80(z, &r)) {
+                return r;
+            }
+        }
+    }
+#endif
     if (floatx80_invalid_encoding(a) || floatx80_invalid_encoding(b)) {
         float_raise(float_flag_invalid, status);
         return floatx80_default_nan(status);
@@ -6086,6 +6199,18 @@ floatx80 floatx80_mul(floatx80 a, floatx80 b, float_status *status)
     int32_t aExp, bExp, zExp;
     uint64_t aSig, bSig, zSig0, zSig1;
 
+#ifdef DRYDOCK_FX80_FAST
+    if (fx80_fast_ok(status)) {
+        double x, y;
+        if (fx80_to_dbl(a, &x) && fx80_to_dbl(b, &y)) {
+            double z = x * y;
+            floatx80 r;
+            if (dbl_to_fx80(z, &r)) {
+                return r;
+            }
+        }
+    }
+#endif
     if (floatx80_invalid_encoding(a) || floatx80_invalid_encoding(b)) {
         float_raise(float_flag_invalid, status);
         return floatx80_default_nan(status);
@@ -6149,6 +6274,20 @@ floatx80 floatx80_div(floatx80 a, floatx80 b, float_status *status)
     uint64_t aSig, bSig, zSig0, zSig1;
     uint64_t rem0, rem1, rem2, term0, term1, term2;
 
+#ifdef DRYDOCK_FX80_FAST
+    if (fx80_fast_ok(status)) {
+        double x, y;
+        if (fx80_to_dbl(a, &x) && fx80_to_dbl(b, &y)) {
+            if (y != 0) {
+                double z = x / y;
+                floatx80 r;
+                if (dbl_to_fx80(z, &r)) {
+                    return r;
+                }
+            }
+        }
+    }
+#endif
     if (floatx80_invalid_encoding(a) || floatx80_invalid_encoding(b)) {
         float_raise(float_flag_invalid, status);
         return floatx80_default_nan(status);

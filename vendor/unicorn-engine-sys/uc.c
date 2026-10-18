@@ -1265,6 +1265,15 @@ void uc_drydock_fast_count(uc_engine *uc, uint64_t *insns, uint64_t *limit,
     uc->fc_code_pages = code_pages;
 }
 
+extern int drydock_fx80_fast_enabled;
+
+// Drydock (0005): enable or disable the host-double x87 fast paths (default on).
+UNICORN_EXPORT
+void uc_drydock_set_fast_fp(int enabled)
+{
+    drydock_fx80_fast_enabled = enabled;
+}
+
 UNICORN_EXPORT
 uc_err uc_emu_stop(uc_engine *uc)
 {

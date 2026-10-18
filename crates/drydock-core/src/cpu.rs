@@ -183,6 +183,17 @@ unsafe extern "C" {
     );
 }
 
+unsafe extern "C" {
+    /// Vendored Unicorn (0005): switch the host-double x87 fast paths on or off.
+    fn uc_drydock_set_fast_fp(enabled: i32);
+}
+
+/// Enable or disable the x87 fast paths in the vendored Unicorn (process-wide; on by
+/// default). Results are identical either way; tests compare the two.
+pub fn set_fast_fp(enabled: bool) {
+    unsafe { uc_drydock_set_fast_fp(enabled as i32) };
+}
+
 unsafe extern "C" fn block_cb(uc: *mut unicorn_engine::uc_engine, address: u64, size: u32, user: *mut c_void) {
     let st = unsafe { &mut *(user as *mut HookState) };
     // Unicorn checks for a stop request right after this hook, so a block that would

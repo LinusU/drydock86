@@ -75,6 +75,21 @@ holding translated code are recorded at translation time instead of at each exec
 With a null counter pointer the block hook works as before (Drydock uses it to record a
 block trace). Counts, frames and stops are identical to the hook-based version.
 
+**0005: x87 host-double fast paths** (2026-10-18, `qemu/fpu/softfloat.c`,
+`qemu/target/i386/fpu_helper.c`, `uc.c`)
+
+With the x87 control word at 53-bit precision and round-to-nearest-even (what Windows
+programs run with), `floatx80_add/sub/mul/div` and `floatx80_to_float32` compute with
+host doubles when the operands are exactly representable as doubles with moderate
+exponents (zeros included), and the result is a normal double; the result is then the
+correctly rounded one, bit for bit. Everything else (denormals, infinities, NaNs,
+64-bit mantissas, other precisions or rounding modes, out-of-range results) takes the
+original softfloat path. The inexact flag is not raised on the fast paths; the x87
+model never exposes it (only the invalid flag is read, by the integer conversions).
+`FLD m32` converts normal singles directly. `uc_drydock_set_fast_fp(0)` turns the
+double paths off; `crates/drydock-core/tests/x87.rs` runs randomised x87 programs both
+ways and compares every result and status word.
+
 To update Unicorn: replace `unicorn-engine-sys/` with the new published crate, apply
 the patches in order (`patch -p1 -d vendor < vendor/patches/0001-…`), and re-run the
 tests.

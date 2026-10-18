@@ -156,6 +156,19 @@ static void fpu_raise_exception(CPUX86State *env, uintptr_t retaddr)
     }
 }
 
+/* Drydock (0005): normal single-precision values convert without the general
+ * path (no flags can be raised); anything else takes it. */
+static inline floatx80 flds_to_floatx80(CPUX86State *env, uint32_t val)
+{
+    uint32_t exp = (val >> 23) & 0xff;
+
+    if (exp - 1 < 0xfe) {
+        return make_floatx80(((val >> 31) << 15) | (exp + 0x3F80),
+                             (uint64_t)((val & 0x7fffff) | 0x800000) << 40);
+    }
+    return float32_to_floatx80(make_float32(val), &env->fp_status);
+}
+
 void helper_flds_FT0(CPUX86State *env, uint32_t val)
 {
     union {
@@ -163,8 +176,8 @@ void helper_flds_FT0(CPUX86State *env, uint32_t val)
         uint32_t i;
     } u;
 
-    u.i = val;
-    FT0 = float32_to_floatx80(u.f, &env->fp_status);
+    (void)u;
+    FT0 = flds_to_floatx80(env, val);
 }
 
 void helper_fldl_FT0(CPUX86State *env, uint64_t val)
@@ -192,8 +205,8 @@ void helper_flds_ST0(CPUX86State *env, uint32_t val)
     } u;
 
     new_fpstt = (env->fpstt - 1) & 7;
-    u.i = val;
-    env->fpregs[new_fpstt].d = float32_to_floatx80(u.f, &env->fp_status);
+    (void)u;
+    env->fpregs[new_fpstt].d = flds_to_floatx80(env, val);
     env->fpstt = new_fpstt;
     env->fptags[new_fpstt] = 0; /* validate stack entry */
 }
