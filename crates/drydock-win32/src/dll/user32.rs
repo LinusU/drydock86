@@ -756,15 +756,26 @@ fn run_act(s: &mut Session, a: Act, steps: &mut VecDeque<Step>, ret: &mut u32) -
         Act::CommitPos { hwnd, rect, flags } => {
             if let Some(w) = s.user.windows.get_mut(&hwnd) {
                 let old = w.rect;
+                let old_client = w.client;
                 w.rect = rect;
                 w.client = client_from_window(w);
                 let c = w.client;
-                let moved = old.left != rect.left || old.top != rect.top;
-                let sized = old.w() != rect.w() || old.h() != rect.h();
-                let _ = (moved, sized);
+                let (visible, top, style) = (w.visible, w.style & WS_CHILD == 0, w.style);
                 if w.visible {
                     w.invalid = Some(Rect::new(0, 0, c.w(), c.h()));
                     w.erase_pending = true;
+                }
+                // Descendants keep their position relative to the client area.
+                let (dx, dy) = (c.left - old_client.left, c.top - old_client.top);
+                if dx != 0 || dy != 0 {
+                    offset_descendants(s, hwnd, dx, dy);
+                }
+                if visible && old != rect {
+                    if top && style & (WS_CAPTION | WS_BORDER | WS_THICKFRAME | WS_DLGFRAME) != 0 {
+                        s.user.nc_dirty.push(hwnd);
+                    }
+                    expose(s, old, hwnd);
+                    invalidate_tree(s, hwnd);
                 }
                 steps.push_front(Step::Send {
                     hwnd,
@@ -777,6 +788,69 @@ fn run_act(s: &mut Session, a: Act, steps: &mut VecDeque<Step>, ret: &mut u32) -
         }
     }
     Ok(())
+}
+
+fn descendants(s: &Session, h: u32) -> Vec<u32> {
+    let mut out = Vec::new();
+    let mut stack = vec![h];
+    while let Some(p) = stack.pop() {
+        for w in s.user.windows.values() {
+            if w.parent == p && w.style & WS_CHILD != 0 {
+                out.push(w.hwnd);
+                stack.push(w.hwnd);
+            }
+        }
+    }
+    out
+}
+
+fn offset_descendants(s: &mut Session, h: u32, dx: i32, dy: i32) {
+    for c in descendants(s, h) {
+        if let Some(w) = s.user.windows.get_mut(&c) {
+            for r in [&mut w.rect, &mut w.client] {
+                *r = Rect::new(r.left + dx, r.top + dy, r.right + dx, r.bottom + dy);
+            }
+        }
+    }
+}
+
+/// Mark a visible window and its visible descendants for a full repaint.
+pub(crate) fn invalidate_tree(s: &mut Session, h: u32) {
+    let mut all = vec![h];
+    all.extend(descendants(s, h));
+    for c in all {
+        if let Some(w) = s.user.windows.get_mut(&c)
+            && w.visible
+        {
+            w.invalid = Some(Rect::new(0, 0, w.client.w(), w.client.h()));
+            w.erase_pending = true;
+        }
+    }
+}
+
+/// A screen area no longer covered by `gone`: paint the desktop there and have the
+/// other top-level windows that overlap it repaint (frames included). Nothing is
+/// painted while an application owns the display through exclusive DirectDraw.
+pub(crate) fn expose(s: &mut Session, area: Rect, gone: u32) {
+    if s.com.ddraw.exclusive.is_some() || area.is_empty() {
+        return;
+    }
+    let hdc = crate::dll::gdi32::window_dc(s, HWND_DESKTOP, true);
+    let _ = crate::dll::gdi32::fill_solid(s, hdc, &area, 0);
+    crate::dll::gdi32::release_dc_handle(s, hdc);
+    let below: Vec<(u32, u32)> = s
+        .user
+        .windows
+        .values()
+        .filter(|w| w.hwnd != gone && w.visible && w.style & WS_CHILD == 0 && !w.rect.intersect(&area).is_empty())
+        .map(|w| (w.hwnd, w.style))
+        .collect();
+    for (h, style) in below {
+        if style & (WS_CAPTION | WS_BORDER | WS_THICKFRAME | WS_DLGFRAME) != 0 && !s.user.nc_dirty.contains(&h) {
+            s.user.nc_dirty.push(h);
+        }
+        invalidate_tree(s, h);
+    }
 }
 
 fn windowpos(hwnd: u32, r: &Rect, flags: u32) -> [u8; 28] {
@@ -1052,10 +1126,13 @@ fn show_steps(s: &mut Session, hwnd: u32, cmd: u32) -> Result<Vec<Step>, ApiErro
                 }
                 let wm = s.user.windows.get_mut(&hwnd).unwrap();
                 wm.style |= WS_VISIBLE;
-                wm.invalid = Some(Rect::new(0, 0, wm.client.w(), wm.client.h()));
-                wm.erase_pending = true;
+                invalidate_tree(s, hwnd);
             } else {
                 wm.style &= !WS_VISIBLE;
+                if wm.style & WS_CHILD == 0 {
+                    let r = wm.rect;
+                    expose(s, r, hwnd);
+                }
             }
         }
         v.push(Step::Send {
@@ -1169,6 +1246,9 @@ fn destroy_steps(s: &mut Session, h: u32) -> Vec<Step> {
         v.push(send(h, WM_SHOWWINDOW, 0, 0));
         if let Some(wm) = s.user.windows.get_mut(&h) {
             wm.visible = false;
+        }
+        if w.style & WS_CHILD == 0 {
+            expose(s, w.rect, h);
         }
     }
     if s.user.active == h {
@@ -1984,13 +2064,10 @@ fn get_next_message(s: &mut Session, hwnd: u32, min: u32, max: u32, remove: bool
             .user
             .windows
             .values()
-            .find(|w| w.tid == tid && w.visible && w.invalid.is_some() && (hwnd == 0 || w.hwnd == hwnd))
+            .find(|w| w.tid == tid && w.invalid.is_some() && (hwnd == 0 || w.hwnd == hwnd) && s.really_visible(w.hwnd))
             .map(|w| w.hwnd);
         if let Some(h) = paint {
-            if s.user.nc_dirty.contains(&h) {
-                s.user.nc_dirty.retain(|&x| x != h);
-                let _ = crate::dll::dialog::paint_dialog_frame(s, h);
-            }
+            paint_frame_if_dirty(s, h);
             return Some(Msg {
                 hwnd: h,
                 message: WM_PAINT,
@@ -2266,10 +2343,35 @@ fn get_update_rect(s: &mut Session) -> ApiResult {
     Ok(ApiRet::Ret(r.is_some() as u32))
 }
 
+/// Draw a window's frame when it needs repainting (the WM_NCPAINT of a WM_PAINT cycle).
+fn paint_frame_if_dirty(s: &mut Session, h: u32) {
+    if s.user.nc_dirty.contains(&h) {
+        s.user.nc_dirty.retain(|&x| x != h);
+        let _ = crate::dll::dialog::paint_dialog_frame(s, h);
+    }
+}
+
+impl Session {
+    /// A window is visible on screen only when it and all its ancestors are visible.
+    pub fn really_visible(&self, mut h: u32) -> bool {
+        while let Some(w) = self.user.windows.get(&h) {
+            if !w.visible {
+                return false;
+            }
+            if w.style & WS_CHILD == 0 || w.parent == 0 {
+                return true;
+            }
+            h = w.parent;
+        }
+        false
+    }
+}
+
 fn update_window(s: &mut Session) -> ApiResult {
     let [h] = s.args::<1>()?;
-    let inv = s.window(h).map(|w| w.invalid.is_some() && w.visible).unwrap_or(false);
+    let inv = s.window(h).map(|w| w.invalid.is_some()).unwrap_or(false) && s.really_visible(h);
     if inv {
+        paint_frame_if_dirty(s, h);
         let steps = VecDeque::from(vec![send(h, WM_PAINT, 0, 0), Step::Act(Act::SetRet(1))]);
         return run_seq(s, steps, 1);
     }
@@ -2467,7 +2569,7 @@ fn window_at(s: &Session, x: i32, y: i32) -> u32 {
     // Topmost-ish: last created visible window containing the point; prefer children.
     let mut best = 0;
     for w in s.user.windows.values() {
-        if w.visible && w.rect.contains(x, y) {
+        if w.rect.contains(x, y) && s.really_visible(w.hwnd) {
             best = w.hwnd;
         }
     }

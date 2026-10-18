@@ -894,14 +894,19 @@ mod tests {
         let q = |c: u32| c & 0xf8fcf8;
         assert_eq!(q(centre_pixel(&mut s, client)), q(rgb(COLOURS[1])));
 
+        // Frame 2 is shown from 133 ms.
+        assert_eq!(run_to(&mut s, 170), RunStop::TimeReached);
+        assert_eq!(s.frames_presented, presented + 1);
+        assert_eq!(q(centre_pixel(&mut s, client)), q(rgb(COLOURS[2])));
+
         // The movie ends after 3 frames (200 ms); the program sees the stop at its next
         // 20 ms poll and exits with MCI_PLAY's result (0).
         assert_eq!(run_to(&mut s, 1000), RunStop::Exited { code: 0 });
         let end = s.clock.now_ns();
         assert!((200_000_000..260_000_000).contains(&end), "ended at {end} ns");
-        assert_eq!(s.frames_presented, presented + 1);
-        assert_eq!(q(centre_pixel(&mut s, client)), q(rgb(COLOURS[2])));
         assert!(s.vfw.players.is_empty(), "WM_CLOSE destroys the window");
+        // The desktop shows again where the window was.
+        assert_eq!(centre_pixel(&mut s, client) & 0xffffff, 0);
         assert!(s.diag.missing.is_empty(), "{:?}", s.diag.missing);
 
         // The sound track (200 ms of a +/-0.56 square wave, interpolated through zero

@@ -558,9 +558,8 @@ fn finish_creation(s: &mut Session, hdlg: u32, modal: bool, owner: u32, init_ret
         if let Some(w) = s.user.windows.get_mut(&hdlg) {
             w.visible = true;
             w.style |= WS_VISIBLE;
-            w.invalid = Some(Rect::new(0, 0, w.client.w(), w.client.h()));
-            w.erase_pending = true;
         }
+        invalidate_tree(s, hdlg);
         s.user.nc_dirty.push(hdlg);
         steps.push_back(Step::Act(Act::Activate(hdlg)));
     }
