@@ -180,6 +180,9 @@ fn session_thread(args: RunArgs, rx: Receiver<ToSession>, tx: SyncSender<ToUi>, 
         return;
     }
     let mut d = Driver::new(s, Pacing::Realtime);
+    // --seconds counts from the start of this run (a restored checkpoint's time onwards),
+    // as in headless runs.
+    let limit_ns = d.s.clock.now_ns() + (args.seconds * 1e9) as u64;
     let mut redraw = RedrawTracker::default();
     let mut inflight: Option<drydock_win32::observe::PresentJob> = None;
     let mut last_rel: Option<(i32, i32)> = None;
@@ -206,7 +209,7 @@ fn session_thread(args: RunArgs, rx: Receiver<ToSession>, tx: SyncSender<ToUi>, 
             }
         }
         let stop = d.advance(4_000_000, false);
-        if args.seconds > 0.0 && d.s.clock.now_ns() as f64 / 1e9 >= args.seconds && args.play_limit {
+        if args.seconds > 0.0 && d.s.clock.now_ns() >= limit_ns && args.play_limit {
             write_artifacts(&mut d, &args, &stop);
             let _ = tx.send(ToUi::Stopped("time limit reached".into()));
             let _ = proxy.send_event(());
