@@ -61,4 +61,5 @@ pub static BUILTINS: &[BuiltinDll] = &[
     dll!("DPLAYX.DLL", crate::com::DPLAYX_EXPORTS),
     dll!("DMUSIC.DLL", crate::com::dmusic::DMUSIC_EXPORTS),
     dll!("VERSION.DLL", version::VERSION_EXPORTS),
+    dll!("AVIFIL32.DLL", &[]),
 ];
