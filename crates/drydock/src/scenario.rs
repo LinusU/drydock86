@@ -66,6 +66,10 @@ pub enum Step {
         #[serde(default)]
         button: Option<String>,
     },
+    /// Click without moving the pointer (for pointers driven by relative motion).
+    ClickHere {
+        click_here: String,
+    },
     MouseMove {
         mouse_move: [i32; 2],
     },
@@ -289,6 +293,18 @@ pub fn step(
             inp.schedule(now + 10_000_000, InputEvent::MouseButton { button: b, down: true });
             inp.schedule(now + 70_000_000, InputEvent::MouseButton { button: b, down: false });
             advance(d, 120_000_000)
+        }
+        Step::ClickHere { click_here } => {
+            let b = match click_here.as_str() {
+                "right" => 1,
+                "middle" => 2,
+                _ => 0,
+            };
+            let now = d.s.clock.now_ns();
+            let inp = &mut d.s.user.input;
+            inp.schedule(now, InputEvent::MouseButton { button: b, down: true });
+            inp.schedule(now + 60_000_000, InputEvent::MouseButton { button: b, down: false });
+            advance(d, 110_000_000)
         }
         Step::MouseMove { mouse_move } => {
             let now = d.s.clock.now_ns();

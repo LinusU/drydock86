@@ -43,6 +43,7 @@ DirectInput).
 | `{"key_down": K}` / `{"key_up": K}` | Press or release a key and leave it in that state. |
 | `{"type": "text"}` | Type letters, digits, space and newline (Enter), with Shift for capitals. |
 | `{"click": [x, y], "button": "left"\|"right"\|"middle"}` | Move the pointer to screen coordinates and click. |
+| `{"click_here": "left"\|"right"\|"middle"}` | Click without moving the pointer (for cursors that programs draw from relative mouse motion). |
 | `{"mouse_move": [x, y]}` | Move the pointer (absolute screen coordinates). |
 | `{"mouse_rel": [dx, dy]}` | Relative motion, as from a captured mouse. |
 | `{"release_all": true}` | Release every pressed key and button. |
