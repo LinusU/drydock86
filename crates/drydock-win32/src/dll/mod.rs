@@ -10,6 +10,7 @@ pub mod kernel32_nls;
 pub mod misc;
 pub mod msvfw32;
 pub mod user32;
+pub mod version;
 pub mod winmm;
 
 use crate::api::ExportDef;
@@ -59,4 +60,5 @@ pub static BUILTINS: &[BuiltinDll] = &[
     dll!("DSOUND.DLL", crate::com::DSOUND_EXPORTS),
     dll!("DPLAYX.DLL", crate::com::DPLAYX_EXPORTS),
     dll!("DMUSIC.DLL", crate::com::dmusic::DMUSIC_EXPORTS),
+    dll!("VERSION.DLL", version::VERSION_EXPORTS),
 ];

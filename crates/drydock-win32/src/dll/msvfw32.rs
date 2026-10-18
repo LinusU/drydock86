@@ -222,7 +222,7 @@ impl Player {
 
 // ---------------------------------------------------------------- media loading
 
-fn read_guest_file(s: &mut Session, name: &str) -> Result<Vec<u8>, String> {
+pub(crate) fn read_guest_file(s: &mut Session, name: &str) -> Result<Vec<u8>, String> {
     let gp = s.guest_path(name).ok_or_else(|| format!("invalid path {name:?}"))?;
     let now = s.clock.now_ns();
     let (mut f, _) = s
