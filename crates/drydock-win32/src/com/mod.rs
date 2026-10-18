@@ -10,6 +10,7 @@ pub mod d3d6;
 pub mod ddraw;
 pub mod dinput;
 pub mod dmusic;
+pub mod dplay;
 pub mod dsound;
 pub mod ole;
 
@@ -110,6 +111,7 @@ pub enum ComKind {
     Ds3dBuffer(u32),
     ClassFactory(Guid),
     DMusic(dmusic::DmKind),
+    DPlayLobby,
     Viewport3(Box<d3d6::Viewport3>),
     Material3(d3d6::Material3),
     Light3(Box<d3d6::Light3>),
@@ -279,6 +281,9 @@ pub static ALL_IFACES: &[&IfaceDef] = &[
     &dsound::IDIRECTSOUND3DLISTENER,
     &dsound::IDIRECTSOUND3DBUFFER,
     &ole::ICLASSFACTORY,
+    &dplay::IDIRECTPLAYLOBBYA,
+    &dplay::IDIRECTPLAYLOBBY2A,
+    &dplay::IDIRECTPLAYLOBBY3A,
     &dmusic::IDIRECTMUSIC,
     &dmusic::IDIRECTMUSIC2,
     &dmusic::IDIRECTMUSICPORT,
@@ -343,6 +348,7 @@ fn supported(kind: &ComKind) -> Vec<&'static IfaceDef> {
         ComKind::Ds3dBuffer(_) => vec![&dsound::IDIRECTSOUND3DBUFFER],
         ComKind::ClassFactory(_) => vec![&ole::ICLASSFACTORY],
         ComKind::DMusic(k) => dmusic::supported(k),
+        ComKind::DPlayLobby => dplay::LOBBY_IFACES.to_vec(),
     }
 }
 
