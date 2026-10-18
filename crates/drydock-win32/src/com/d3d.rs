@@ -1171,6 +1171,23 @@ fn sync_texture(s: &mut Session, obj: u32) -> Option<u32> {
     Some(top)
 }
 
+/// Lighting colour sources (0 material, 1 diffuse vertex colour, 2 specular vertex
+/// colour). A source naming a colour the vertex format lacks uses the material
+/// colour, as in Direct3D.
+fn material_sources(rs: &[u32], fvf: u32) -> [u32; 4] {
+    let src = |v: u32| match v.min(2) {
+        1 if fvf & 0x40 == 0 => 0,
+        2 if fvf & 0x80 == 0 => 0,
+        v => v,
+    };
+    [
+        src(rs[RS_DIFFUSEMATERIALSOURCE]),
+        src(rs[RS_AMBIENTMATERIALSOURCE]),
+        src(rs[RS_SPECULARMATERIALSOURCE]),
+        src(rs[RS_EMISSIVEMATERIALSOURCE]),
+    ]
+}
+
 fn build_uniforms(s: &Session, d: &Device, pretransformed: bool, fvf: u32, tw: f32, th: f32) -> gfx::Uniforms {
     let mut u = gfx::Uniforms::default();
     let world = d.transforms.get(&1).copied().unwrap_or(IDENTITY);
@@ -1243,13 +1260,7 @@ fn build_uniforms(s: &Session, d: &Device, pretransformed: bool, fvf: u32, tw: f
     u.mat_specular = d.material.specular;
     u.mat_emissive = d.material.emissive;
     u.mat_power = [d.material.power, 0.0, 0.0, 0.0];
-    let src = |v: u32| v.min(2);
-    u.color_src = [
-        src(rs[RS_DIFFUSEMATERIALSOURCE]),
-        src(rs[RS_AMBIENTMATERIALSOURCE]),
-        src(rs[RS_SPECULARMATERIALSOURCE]),
-        src(rs[RS_EMISSIVEMATERIALSOURCE]),
-    ];
+    u.color_src = material_sources(rs, fvf);
     let mut li = 0;
     for (idx, l) in &d.lights {
         if li >= 8 {
@@ -2439,6 +2450,18 @@ mod tests {
         assert_eq!(s, vec![0, 1, 2, 2, 1, 3, 2, 3, 4]);
         let (_, f) = primitive_indices(6, 4, None).unwrap();
         assert_eq!(f, vec![0, 1, 2, 0, 2, 3]);
+    }
+    #[test]
+    fn material_sources_fall_back_to_the_material() {
+        let mut rs = default_rs(true);
+        rs[RS_DIFFUSEMATERIALSOURCE] = 1;
+        rs[RS_SPECULARMATERIALSOURCE] = 2;
+        // XYZ|NORMAL|TEX1: no vertex colours, so both use the material.
+        assert_eq!(material_sources(&rs, 0x112)[0], 0);
+        assert_eq!(material_sources(&rs, 0x112)[2], 0);
+        // With DIFFUSE|SPECULAR the vertex colours are used.
+        assert_eq!(material_sources(&rs, 0x1d2)[0], 1);
+        assert_eq!(material_sources(&rs, 0x1d2)[2], 2);
     }
     #[test]
     fn normal_matrix_of_uniform_scale() {
