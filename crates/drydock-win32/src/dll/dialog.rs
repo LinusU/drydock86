@@ -57,6 +57,12 @@ pub struct CtlState {
     pub scroll: u32,
     pub font: u32,
     pub readonly: bool,
+    /// Drop-down combo box: the list is open.
+    #[serde(default)]
+    pub dropped: bool,
+    /// Drop-down combo box: height including the list, from the creation size.
+    #[serde(default)]
+    pub drop_h: i32,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -1319,10 +1325,42 @@ fn list_wnd_proc(s: &mut Session, combo: bool) -> ApiResult {
                     String::new()
                 };
                 let hdc = super::gdi32::window_dc(s, hwnd, false);
-                let (cw, ch) = (w.client.w(), w.client.h().min(if combo { 21 } else { i32::MAX }));
+                let (cw, ch) = (
+                    w.client.w(),
+                    w.client.h().min(if combo { COMBO_CLOSED_H } else { i32::MAX }),
+                );
                 super::gdi32::fill_solid(s, hdc, &Rect::new(0, 0, cw, ch), 0xffffff)?;
                 draw_edge(s, hdc, cw, ch, 0x808080, 0xffffff)?;
                 let font = ctl_font_lf(s, hwnd);
+                if combo && st.dropped {
+                    // The open list below the box, the selection highlighted.
+                    let top = COMBO_CLOSED_H;
+                    let lh = w.client.h() - top;
+                    super::gdi32::fill_solid(s, hdc, &Rect::new(0, top, cw, top + lh), 0xffffff)?;
+                    super::gdi32::fill_solid(s, hdc, &Rect::new(0, top, cw, top + 1), 0)?;
+                    super::gdi32::fill_solid(s, hdc, &Rect::new(0, top + lh - 1, cw, top + lh), 0)?;
+                    super::gdi32::fill_solid(s, hdc, &Rect::new(0, top, 1, top + lh), 0)?;
+                    super::gdi32::fill_solid(s, hdc, &Rect::new(cw - 1, top, cw, top + lh), 0)?;
+                    for (i, it) in st.items.iter().enumerate() {
+                        let y = top + 1 + i as i32 * COMBO_ITEM_H;
+                        if y + COMBO_ITEM_H > top + lh {
+                            break;
+                        }
+                        let sel = i as i32 == st.cursel;
+                        if sel {
+                            super::gdi32::fill_solid(s, hdc, &Rect::new(1, y, cw - 1, y + COMBO_ITEM_H), 0x6a240a)?;
+                        }
+                        super::gdi32::draw_label(
+                            s,
+                            hdc,
+                            font,
+                            &it.0,
+                            &Rect::new(3, y, cw - 3, y + COMBO_ITEM_H),
+                            0x20 | 0x4,
+                            if sel { 0xffffff } else { 0 },
+                        )?;
+                    }
+                }
                 let text = if combo {
                     label
                 } else {
@@ -1347,10 +1385,16 @@ fn list_wnd_proc(s: &mut Session, combo: bool) -> ApiResult {
         WM_KEYDOWN if wp == 0x26 || wp == 0x28 => {
             let st = ctl_state(s, hwnd);
             let n = st.items.len() as i32;
+            let old = st.cursel;
             if n > 0 {
                 st.cursel = (st.cursel + if wp == 0x28 { 1 } else { -1 }).clamp(0, n - 1);
             }
+            let changed = st.cursel != old;
             invalidate(s, hwnd);
+            if changed {
+                // CBN_SELCHANGE / LBN_SELCHANGE (both 1).
+                return run_seq(s, notify_steps(s, hwnd, 1).into(), 0);
+            }
             0
         }
         WM_GETDLGCODE => 0x1 | 0x4,
@@ -1362,7 +1406,127 @@ fn list_wnd_proc(s: &mut Session, combo: bool) -> ApiResult {
     Ok(ApiRet::Ret(r))
 }
 
+/// Height of a closed drop-down combo box and of one list item.
+const COMBO_CLOSED_H: i32 = 21;
+const COMBO_ITEM_H: i32 = 13;
+const CBN_SELCHANGE: u32 = 1;
+const CBN_DROPDOWN: u32 = 7;
+const CBN_CLOSEUP: u32 = 8;
+
+fn is_drop_down(s: &Session, hwnd: u32) -> bool {
+    s.window(hwnd)
+        .is_some_and(|w| w.class == "COMBOBOX" && matches!(w.style & 3, 2 | 3))
+}
+
+/// Resize a drop-down combo box to its closed or open height.
+fn set_combo_height(s: &mut Session, hwnd: u32, h: i32) {
+    if let Some(w) = s.user.windows.get_mut(&hwnd) {
+        w.rect.bottom = w.rect.top + h;
+        w.client.bottom = w.client.top + h;
+    }
+}
+
+/// WM_COMMAND notification from a control to its parent.
+fn notify_steps(s: &Session, hwnd: u32, code: u32) -> Vec<Step> {
+    match s.window(hwnd) {
+        Some(w) if w.parent != 0 => vec![Step::Send {
+            hwnd: w.parent,
+            msg: WM_COMMAND,
+            wp: (code << 16) | (w.id & 0xffff),
+            lp: LParam::Val(hwnd),
+            check: Check::None,
+        }],
+        _ => vec![],
+    }
+}
+
+fn combo_open(s: &mut Session, hwnd: u32) -> ApiResult {
+    let st = ctl_state(s, hwnd);
+    let list_h = (st.drop_h - COMBO_CLOSED_H)
+        .min(st.items.len().max(1) as i32 * COMBO_ITEM_H + 2)
+        .max(COMBO_ITEM_H + 2);
+    st.dropped = true;
+    set_combo_height(s, hwnd, COMBO_CLOSED_H + list_h);
+    // The open list tracks the mouse until it closes.
+    s.user.capture = hwnd;
+    invalidate(s, hwnd);
+    run_seq(s, notify_steps(s, hwnd, CBN_DROPDOWN).into(), 0)
+}
+
+fn combo_close(s: &mut Session, hwnd: u32, selected: bool) -> ApiResult {
+    ctl_state(s, hwnd).dropped = false;
+    set_combo_height(s, hwnd, COMBO_CLOSED_H);
+    if s.user.capture == hwnd {
+        s.user.capture = 0;
+    }
+    // The dialog repaints where the list was.
+    let parent = s.window(hwnd).map(|w| w.parent).unwrap_or(0);
+    invalidate_tree(s, parent);
+    let mut steps = notify_steps(s, hwnd, CBN_CLOSEUP);
+    if selected {
+        steps.extend(notify_steps(s, hwnd, CBN_SELCHANGE));
+    }
+    run_seq(s, steps.into(), 0)
+}
+
+/// Mouse and focus handling of drop-down combo boxes.
+fn combo_drop_down(s: &mut Session, hwnd: u32, msg: u32, lp: u32) -> Option<ApiResult> {
+    if !is_drop_down(s, hwnd) {
+        return None;
+    }
+    let dropped = ctl_state(s, hwnd).dropped;
+    match msg {
+        WM_LBUTTONDOWN if !dropped => Some(combo_open(s, hwnd)),
+        WM_LBUTTONDOWN => {
+            let (x, y) = ((lp & 0xffff) as i16 as i32, (lp >> 16) as i16 as i32);
+            let w = s.window(hwnd)?.client;
+            let mut selected = false;
+            if x >= 0 && x < w.w() && y > COMBO_CLOSED_H && y < w.h() - 1 {
+                let i = (y - COMBO_CLOSED_H - 1) / COMBO_ITEM_H;
+                let st = ctl_state(s, hwnd);
+                if (i as usize) < st.items.len() && st.cursel != i {
+                    st.cursel = i;
+                    selected = true;
+                }
+            }
+            Some(combo_close(s, hwnd, selected))
+        }
+        WM_KILLFOCUS if dropped => Some(combo_close(s, hwnd, false)),
+        0x0157 => Some(Ok(ApiRet::Ret(dropped as u32))), // CB_GETDROPPEDSTATE
+        _ => None,
+    }
+}
+
 fn combo_box_wnd_proc_a(s: &mut Session) -> ApiResult {
+    let [hwnd, msg, wp, lp] = s.args::<4>()?;
+    match msg {
+        WM_CREATE if is_drop_down(s, hwnd) => {
+            // The creation height includes the list; the closed box is one line.
+            let h = s.window(hwnd).map(|w| w.rect.h()).unwrap_or(0);
+            ctl_state(s, hwnd).drop_h = h.max(COMBO_CLOSED_H);
+            set_combo_height(s, hwnd, COMBO_CLOSED_H);
+            return Ok(ApiRet::Ret(0));
+        }
+        0x014f if is_drop_down(s, hwnd) => {
+            let dropped = ctl_state(s, hwnd).dropped;
+            return match (wp != 0, dropped) {
+                (true, false) => combo_open(s, hwnd).map(|_| ApiRet::Ret(1)),
+                (false, true) => combo_close(s, hwnd, false).map(|_| ApiRet::Ret(1)),
+                _ => Ok(ApiRet::Ret(1)),
+            };
+        }
+        0x0154 => {
+            return Ok(ApiRet::Ret(if wp as i32 == -1 {
+                COMBO_CLOSED_H as u32 - 6
+            } else {
+                COMBO_ITEM_H as u32
+            }));
+        }
+        _ => {}
+    }
+    if let Some(r) = combo_drop_down(s, hwnd, msg, lp) {
+        return r;
+    }
     list_wnd_proc(s, true)
 }
 fn list_box_wnd_proc_a(s: &mut Session) -> ApiResult {
