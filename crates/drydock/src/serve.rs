@@ -39,6 +39,7 @@ const METHODS: &[&str] = &[
     "memory.read",
     "memory.write",
     "memory.search",
+    "surfaces",
     "regs.get",
     "regs.set",
     "breakpoint.add",
@@ -284,6 +285,33 @@ impl Server {
                 let o = self.session()?;
                 let b = o.d.s.mem.read_vec(addr, len).map_err(|e| anyhow!("{e:?}"))?;
                 Ok(json!({ "addr": addr, "hex": hex_encode(&b) }))
+            }
+            "surfaces" => {
+                // Pixel surfaces (DirectDraw, Direct3D and GDI bitmaps) and where they live.
+                let o = self.session()?;
+                let s = &o.d.s;
+                let list: Vec<_> = s
+                    .display
+                    .surfaces
+                    .values()
+                    .map(|sf| {
+                        // DirectDraw surface objects showing these pixels, with their
+                        // interface pointers.
+                        let objects: Vec<_> = s
+                            .com
+                            .objs
+                            .values()
+                            .filter(|c| s.surface_of_obj(c.id) == Some(sf.id))
+                            .map(|c| json!({ "object": c.id, "refs": c.refs, "interfaces": c.ifaces }))
+                            .collect();
+                        json!({
+                            "id": sf.id, "w": sf.w, "h": sf.h, "format": format!("{:?}", sf.fmt),
+                            "mem": sf.mem, "pitch": sf.pitch, "bottom_up": sf.bottom_up,
+                            "caps": sf.caps, "gpu_dirty": sf.gpu_dirty, "objects": objects,
+                        })
+                    })
+                    .collect();
+                Ok(json!({ "surfaces": list, "front": o.d.s.display.front }))
             }
             "memory.write" => {
                 let addr = u32_param(p, "addr")?;

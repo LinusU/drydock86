@@ -102,6 +102,7 @@ open option.
 | `screenshot` | `path` (optional) | `width`, `height`, and `path` or `png_base64` |
 | `memory.read` | `addr`, `len` (≤ 1 MiB) | `addr`, `hex` |
 | `memory.search` | `hex` or `text`, `limit` | `hits` (addresses) |
+| `surfaces` | – | `surfaces` (id, size, pixel format, guest address and pitch, row order, caps, and the DirectDraw objects showing them with their reference counts and interface pointers) and the scanned-out `front` surface |
 | `regs.get` | `tid` (default: current thread) | `tid`, `regs` (general, EIP, EFLAGS, FS base, x87, MXCSR, XMM) |
 
 ### Debugging
