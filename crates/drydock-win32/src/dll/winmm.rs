@@ -30,6 +30,11 @@ pub struct MmState {
     pub timer_thread: Option<u32>,
     pub mci: std::collections::BTreeMap<u32, MciDevice>,
     pub next_mci: u32,
+    /// Open Audio Compression Manager streams.
+    #[serde(default)]
+    pub acm: std::collections::BTreeMap<u32, crate::dll::msacm32::AcmStream>,
+    #[serde(default)]
+    pub next_acm: u32,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -49,6 +54,8 @@ impl Default for MmState {
             timer_thread: None,
             mci: Default::default(),
             next_mci: 1,
+            acm: Default::default(),
+            next_acm: 1,
         }
     }
 }

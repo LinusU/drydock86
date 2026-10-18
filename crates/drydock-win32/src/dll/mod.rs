@@ -8,6 +8,7 @@ pub mod kernel32_file;
 pub mod kernel32_misc;
 pub mod kernel32_nls;
 pub mod misc;
+pub mod msacm32;
 pub mod msvfw32;
 pub mod user32;
 pub mod version;
@@ -62,4 +63,5 @@ pub static BUILTINS: &[BuiltinDll] = &[
     dll!("DMUSIC.DLL", crate::com::dmusic::DMUSIC_EXPORTS),
     dll!("VERSION.DLL", version::VERSION_EXPORTS),
     dll!("AVIFIL32.DLL", &[]),
+    dll!("MSACM32.DLL", msacm32::MSACM32_EXPORTS),
 ];
