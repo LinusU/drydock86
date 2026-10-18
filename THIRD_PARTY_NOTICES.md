@@ -36,6 +36,7 @@ tables were converted mechanically from the C sources.
 | winit | 0.30 | Apache-2.0 | Desktop window and input |
 | cpal | 0.16 | Apache-2.0 | Host audio output |
 | fontdue | 0.9 | MIT OR Apache-2.0 OR Zlib | Font rasterization |
+| ttf-parser | 0.25 | MIT OR Apache-2.0 | Names and metrics of guest TrueType fonts |
 | png | 0.17 | MIT OR Apache-2.0 | PNG encoding |
 | serde, serde_json | 1.x | MIT OR Apache-2.0 | Serialization |
 | rmp-serde | 1.3 | MIT | Checkpoint encoding |

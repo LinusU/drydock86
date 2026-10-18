@@ -410,7 +410,7 @@ pub fn draw_label(
         Some(GdiObj::Font(lf)) => lf.clone(),
         _ => system_font("MS Sans Serif", -11, 400),
     };
-    let fi = font_inst(&lf);
+    let fi = font_inst(s, &lf);
     let Some((id, (ox, oy), clip)) = dc_target(s, hdc) else {
         return Ok(());
     };
@@ -699,7 +699,33 @@ struct FontInst {
     internal_leading: i32,
 }
 
-fn font_inst(lf: &LogFont) -> FontInst {
+/// Vertical metrics (usWinAscent, usWinDescent per 2048 units/em) of the TrueType fonts
+/// installed with Windows 2000. Text in these faces is drawn with the bundled
+/// Liberation fonts but laid out with the line height Windows gives the real face.
+const WINDOWS_FACES: &[(&str, u32, u32)] = &[
+    ("ARIAL BLACK", 2254, 634),
+    ("ARIAL", 1854, 434),
+    ("COMIC SANS MS", 2257, 597),
+    ("COURIER NEW", 1705, 615),
+    ("GEORGIA", 1878, 449),
+    ("IMPACT", 2066, 432),
+    ("LUCIDA CONSOLE", 1616, 432),
+    ("MICROSOFT SANS SERIF", 1888, 430),
+    ("TAHOMA", 2049, 423),
+    ("TIMES NEW ROMAN", 1825, 443),
+    ("TREBUCHET MS", 1923, 455),
+    ("VERDANA", 2059, 430),
+];
+
+/// The font a LOGFONT selects: an installed guest font of that face, else a bundled one.
+fn font_inst(s: &mut Session, lf: &LogFont) -> FontInst {
+    match s.find_guest_font(&lf.face, lf.weight, lf.italic) {
+        Some(g) => scaled(g.font, lf, g.ascent, g.descent),
+        None => fallback_font_inst(lf),
+    }
+}
+
+fn fallback_font_inst(lf: &LogFont) -> FontInst {
     let f = fonts();
     let face = lf.face.to_uppercase();
     let font = if face.contains("COURIER")
@@ -717,11 +743,22 @@ fn font_inst(lf: &LogFont) -> FontInst {
         &f.sans
     };
     let m = font.horizontal_line_metrics(1.0).unwrap();
-    let cell_per_em = m.ascent - m.descent;
+    // Ascent and descent per em: the requested Windows face's, else the drawing font's.
+    // (Face names may carry a style suffix, such as "Trebuchet MS Bold".)
+    let (asc, desc) = WINDOWS_FACES
+        .iter()
+        .find(|(n, _, _)| face == *n || face.strip_prefix(n).is_some_and(|r| r.starts_with(' ')))
+        .map(|&(_, a, d)| (a as f32 / 2048.0, d as f32 / 2048.0))
+        .unwrap_or((m.ascent, -m.descent));
+    scaled(font, lf, asc, desc)
+}
+
+/// Pixel metrics for the LOGFONT height, given ascent and descent per em.
+fn scaled(font: &'static fontdue::Font, lf: &LogFont, asc: f32, desc: f32) -> FontInst {
     let h = if lf.height == 0 { -12 } else { lf.height };
-    let px = if h < 0 { -h as f32 } else { h as f32 / cell_per_em };
-    let ascent = (m.ascent * px).round() as i32;
-    let descent = (-m.descent * px).round() as i32;
+    let px = if h < 0 { -h as f32 } else { h as f32 / (asc + desc) };
+    let ascent = (asc * px).round() as i32;
+    let descent = (desc * px).round() as i32;
     let internal_leading = (ascent + descent) - px.round() as i32;
     FontInst {
         font,
@@ -831,7 +868,7 @@ fn text_out_a(s: &mut Session) -> ApiResult {
         return Ok(ApiRet::Ret(0));
     };
     let lf = dc_font(s, hdc);
-    let fi = font_inst(&lf);
+    let fi = font_inst(s, &lf);
     let Some((id, (ox, oy), clip)) = dc_target(s, hdc) else {
         return Ok(ApiRet::Ret(1));
     };
@@ -864,7 +901,8 @@ fn text_out_a(s: &mut Session) -> ApiResult {
 fn get_text_extent_point32_a(s: &mut Session) -> ApiResult {
     let [hdc, p, n, sz] = s.args::<4>()?;
     let text = crate::strings::decode_ansi(&s.mem.read_vec(p, n)?);
-    let fi = font_inst(&dc_font(s, hdc));
+    let lf = dc_font(s, hdc);
+    let fi = font_inst(s, &lf);
     s.mem.write_u32(sz, text_width(&fi, &text) as u32)?;
     s.mem.write_u32(sz + 4, (fi.ascent + fi.descent) as u32)?;
     Ok(ApiRet::Ret(1))
@@ -873,7 +911,7 @@ fn get_text_extent_point32_a(s: &mut Session) -> ApiResult {
 fn get_text_metrics_a(s: &mut Session) -> ApiResult {
     let [hdc, p] = s.args::<2>()?;
     let lf = dc_font(s, hdc);
-    let fi = font_inst(&lf);
+    let fi = font_inst(s, &lf);
     let avg = char_advance(&fi, 'x');
     let max = ('A'..='Z')
         .map(|c| char_advance(&fi, c))
@@ -1004,7 +1042,7 @@ pub fn draw_text(s: &mut Session, hdc: u32, p: u32, n: u32, prc: u32, fmt: u32, 
         (0, 0)
     };
     let lf = dc_font(s, hdc);
-    let fi = font_inst(&lf);
+    let fi = font_inst(s, &lf);
     let full = s.read_rect(prc)?;
     let rc = Rect::new(full.left + lm, full.top, full.right - rm, full.bottom);
     let lines = layout_lines(&fi, &text, rc.w(), fmt);
@@ -1097,7 +1135,7 @@ mod tests {
 
     #[test]
     fn layout_counts_consumed_characters() {
-        let fi = font_inst(&system_font("MS Sans Serif", -11, 400));
+        let fi = fallback_font_inst(&system_font("MS Sans Serif", -11, 400));
         // Line breaks count towards the line they end.
         let l = layout_lines(&fi, "ab\r\ncd\nef", 1000, 0);
         let counts: Vec<_> = l.iter().map(|x| (x.0.as_str(), x.1)).collect();

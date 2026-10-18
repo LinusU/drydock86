@@ -2,6 +2,7 @@
 
 pub mod advapi32;
 pub mod dialog;
+pub mod fonts;
 pub mod gdi32;
 pub mod gdi32_bitmap;
 pub mod kernel32;
