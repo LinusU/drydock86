@@ -248,7 +248,8 @@ textures so they are rebuilt from guest memory. Unicorn contexts are never seria
 
 In-memory savepoints are clones of the `Checkpoint` value. Disk checkpoints are a
 magic header, a JSON summary (format version, label, virtual time, executable hash)
-and the state as deflated MessagePack. A checkpoint is only accepted by the same
+and the state as deflated MessagePack with struct fields stored by name, so state
+added later with a default value can still be read. A checkpoint is only accepted by the same
 format version and the same executable hash; host mounts are kept from the session
 restoring it, so a checkpoint can be restored against another copy of the
 installation.

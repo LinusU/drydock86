@@ -18,7 +18,9 @@ use serde::{Deserialize, Serialize};
 use std::io::{Read, Write};
 use std::path::Path;
 
-pub const FORMAT_VERSION: u32 = 1;
+/// Version 2 stores struct fields by name, so fields added later with a default stay
+/// readable; version 1 stored them by position.
+pub const FORMAT_VERSION: u32 = 2;
 const MAGIC: &[u8; 8] = b"DRYDOCK\x01";
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -258,7 +260,7 @@ impl Checkpoint {
             .map_err(|e| e.to_string())?;
         w.write_all(&info).map_err(|e| e.to_string())?;
         let mut z = flate2::write::DeflateEncoder::new(w, flate2::Compression::fast());
-        rmp_serde::encode::write(&mut z, self).map_err(|e| e.to_string())?;
+        rmp_serde::encode::write_named(&mut z, self).map_err(|e| e.to_string())?;
         z.finish().and_then(|mut w| w.flush()).map_err(|e| e.to_string())?;
         Ok(())
     }
