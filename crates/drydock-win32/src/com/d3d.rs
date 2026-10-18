@@ -379,6 +379,29 @@ pub fn flush(s: &mut Session) {
     }
 }
 
+/// DDBLT_COLORFILL of a surface whose current contents are on the GPU (a render
+/// target): clear there instead of reading the image back first. Returns false when
+/// the fill should be done in guest memory.
+pub fn color_fill(s: &mut Session, id: u32, r: &Rect, raw: u32) -> bool {
+    let Some(sf) = s.display.surfaces.get(&id).cloned() else {
+        return false;
+    };
+    if !sf.gpu_dirty || sf.fmt.is_depth() || sf.fmt.is_compressed() || sf.fmt.bits() <= 8 {
+        return false;
+    }
+    let bytes = raw.to_le_bytes();
+    let argb = sf.fmt.decode(&bytes[..sf.fmt.bytes_pp() as usize], None);
+    let Ok(rr) = s.renderer() else {
+        return false;
+    };
+    if !rr.has_texture(id) {
+        return false;
+    }
+    let rect = [r.left as u32, r.top as u32, r.w() as u32, r.h() as u32];
+    rr.clear(id, None, rect, Some(color_rgba(argb)), None);
+    true
+}
+
 pub fn depth_fill(s: &mut Session, id: u32, r: &Rect, depth: u32) {
     let gpu = s.display.surfaces.get(&id).map(|x| x.gpu_dirty).unwrap_or(false);
     if gpu || s.host.renderer.as_ref().is_some_and(|rr| rr.has_texture(id)) {

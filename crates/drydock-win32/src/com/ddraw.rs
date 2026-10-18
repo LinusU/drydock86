@@ -1836,6 +1836,10 @@ fn sf_blt(s: &mut Session) -> ApiResult {
     if flags & 0x400 != 0 {
         // DDBLT_COLORFILL: dwFillColor at DDBLTFX+80
         let color = s.mem.read_u32(pfx + 80)?;
+        if crate::com::d3d::color_fill(s, dst, &dr, color) {
+            after_write(s, did, &dsf);
+            return Ok(ApiRet::Ret(DD_OK));
+        }
         s.surface_cpu_access(dst, true);
         let t = PixelTarget::of(&s.display.surfaces[&dst]);
         t.fill_raw(&mut s.mem, &dr, color & crate::surface::mask_bits(t.fmt.bits()))?;
