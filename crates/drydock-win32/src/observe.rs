@@ -197,6 +197,13 @@ impl Session {
         Some((w, h, px))
     }
 
+    /// Identity and write version of the front surface; changes whenever the CPU
+    /// writes to it (GDI drawing) or the front surface is replaced.
+    pub fn present_stamp(&mut self) -> (u32, u64) {
+        let id = self.front_surface();
+        (id, self.display.surfaces.get(&id).map_or(0, |sf| sf.version))
+    }
+
     /// Like [`Session::present_rgba`], but a GPU-resident image is read back
     /// asynchronously so the caller does not wait for the GPU.
     pub fn present_begin(&mut self) -> Option<PresentJob> {

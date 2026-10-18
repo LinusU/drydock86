@@ -179,6 +179,3 @@ race frames differ between Lavapipe and the Apple GPU.
 4. Licence compatibility of Apache-2.0-only dependencies with GPL-2.0-only Unicorn
    for binary distribution (see THIRD_PARTY_NOTICES.md).
 5. Child processes.
-6. The desktop player shows GDI drawing only when something presents (DirectDraw,
-   or a movie frame): a program that only draws with GDI is not redrawn in the
-   player window, although screenshots and headless runs see its output.

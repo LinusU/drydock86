@@ -180,7 +180,7 @@ fn session_thread(args: RunArgs, rx: Receiver<ToSession>, tx: SyncSender<ToUi>, 
         return;
     }
     let mut d = Driver::new(s, Pacing::Realtime);
-    let mut last_frame = u64::MAX;
+    let mut redraw = RedrawTracker::default();
     let mut inflight: Option<drydock_win32::observe::PresentJob> = None;
     let mut last_rel: Option<(i32, i32)> = None;
     loop {
@@ -222,9 +222,11 @@ fn session_thread(args: RunArgs, rx: Receiver<ToSession>, tx: SyncSender<ToUi>, 
             let _ = tx.try_send(ToUi::Frame(Frame { w, h, rgba }));
             let _ = proxy.send_event(());
         }
-        if d.s.frames_presented != last_frame && inflight.is_none() {
-            last_frame = d.s.frames_presented;
-            inflight = d.s.present_begin();
+        if inflight.is_none() {
+            let stamp = d.s.present_stamp();
+            if redraw.wants(d.s.frames_presented, stamp, std::time::Instant::now()) {
+                inflight = d.s.present_begin();
+            }
         }
         match stop {
             RunStop::TimeReached | RunStop::Presented { .. } => {}
@@ -240,6 +242,41 @@ fn session_thread(args: RunArgs, rx: Receiver<ToSession>, tx: SyncSender<ToUi>, 
                 return;
             }
         }
+    }
+}
+
+/// Decides when the player starts a new readback: on every presented frame, and
+/// (rate limited) when the front surface changed without one, as with GDI-only drawing.
+struct RedrawTracker {
+    frame: u64,
+    stamp: Option<(u32, u64)>,
+    last: Option<std::time::Instant>,
+}
+
+impl Default for RedrawTracker {
+    fn default() -> Self {
+        RedrawTracker {
+            frame: u64::MAX,
+            stamp: None,
+            last: None,
+        }
+    }
+}
+
+impl RedrawTracker {
+    const MIN_INTERVAL: Duration = Duration::from_millis(16);
+
+    fn wants(&mut self, frames: u64, stamp: (u32, u64), now: std::time::Instant) -> bool {
+        let presented = frames != self.frame;
+        let changed =
+            self.stamp != Some(stamp) && self.last.is_none_or(|t| now.duration_since(t) >= Self::MIN_INTERVAL);
+        if !presented && !changed {
+            return false;
+        }
+        self.frame = frames;
+        self.stamp = Some(stamp);
+        self.last = Some(now);
+        true
     }
 }
 
@@ -642,4 +679,27 @@ pub fn run(args: RunArgs) -> Result<()> {
         eprintln!("{s}");
     }
     Ok(())
+}
+
+#[cfg(test)]
+mod redraw_tests {
+    use super::*;
+
+    #[test]
+    fn gdi_only_changes_trigger_rate_limited_redraws() {
+        let t0 = std::time::Instant::now();
+        let mut r = RedrawTracker::default();
+        assert!(r.wants(0, (1, 0), t0), "first frame");
+        assert!(!r.wants(0, (1, 0), t0 + Duration::from_secs(1)), "nothing changed");
+        assert!(!r.wants(0, (1, 1), t0 + Duration::from_millis(5)), "too soon");
+        assert!(r.wants(0, (1, 1), t0 + Duration::from_millis(20)), "version bumped");
+        assert!(
+            r.wants(0, (2, 1), t0 + Duration::from_millis(40)),
+            "front surface replaced"
+        );
+        assert!(
+            r.wants(1, (2, 1), t0 + Duration::from_millis(41)),
+            "presented frame is not rate limited"
+        );
+    }
 }
