@@ -1338,7 +1338,7 @@ fn get_proc_address(s: &mut Session) -> ApiResult {
 }
 
 // Resources
-fn res_id(s: &Session, p: u32) -> Result<ResId, ApiError> {
+pub(crate) fn res_id(s: &Session, p: u32) -> Result<ResId, ApiError> {
     if p < 0x10000 {
         return Ok(ResId::Id(p));
     }
@@ -1358,7 +1358,7 @@ pub fn find_resource(s: &mut Session, hmod: u32, ty: ResId, name: ResId) -> Opti
     Some((hmod + e.data_rva, e.size))
 }
 
-fn find_resource_a(s: &mut Session) -> ApiResult {
+pub(crate) fn find_resource_a(s: &mut Session) -> ApiResult {
     let [h, name, ty] = s.args::<3>()?;
     let name = res_id(s, name)?;
     let ty = res_id(s, ty)?;
@@ -1464,7 +1464,7 @@ pub fn systemtime_to_filetime(st: &[u16; 8]) -> Option<u64> {
     Some(secs * 10_000_000 + st[7] as u64 * 10_000)
 }
 
-fn write_systemtime(s: &mut Session, p: u32, st: [u16; 8]) -> Result<(), ApiError> {
+pub(crate) fn write_systemtime(s: &mut Session, p: u32, st: [u16; 8]) -> Result<(), ApiError> {
     for (i, v) in st.iter().enumerate() {
         s.mem.write_u16(p + 2 * i as u32, *v)?;
     }

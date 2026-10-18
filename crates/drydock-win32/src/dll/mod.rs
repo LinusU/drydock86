@@ -5,6 +5,7 @@ pub mod dialog;
 pub mod gdi32;
 pub mod kernel32;
 pub mod kernel32_file;
+pub mod kernel32_misc;
 pub mod kernel32_nls;
 pub mod misc;
 pub mod msvfw32;
@@ -29,7 +30,11 @@ macro_rules! dll {
 
 pub static BUILTINS: &[BuiltinDll] = &[
     dll!("DRYDOCK.DLL", kernel32::DRYDOCK_EXPORTS),
-    dll!("KERNEL32.DLL", kernel32::KERNEL32_EXPORTS),
+    dll!(
+        "KERNEL32.DLL",
+        kernel32::KERNEL32_EXPORTS,
+        kernel32_misc::KERNEL32_MISC_EXPORTS
+    ),
     dll!("NTDLL.DLL", misc::NTDLL_EXPORTS),
     dll!("USER32.DLL", user32::USER32_EXPORTS, dialog::DIALOG_EXPORTS),
     dll!("GDI32.DLL", gdi32::GDI32_EXPORTS),

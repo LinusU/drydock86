@@ -96,7 +96,11 @@ pub fn create_file_a(s: &mut Session) -> ApiResult {
     }
 }
 
-fn with_file<T>(s: &mut Session, h: u32, f: impl FnOnce(&mut Session, &mut vfs::OpenFile) -> T) -> Option<T> {
+pub(crate) fn with_file<T>(
+    s: &mut Session,
+    h: u32,
+    f: impl FnOnce(&mut Session, &mut vfs::OpenFile) -> T,
+) -> Option<T> {
     let id = s.objects.lookup(h)?;
     let mut file = match s.objects.get(id) {
         Some(KObj::File(f)) => f.clone(),
