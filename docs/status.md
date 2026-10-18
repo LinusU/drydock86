@@ -44,6 +44,27 @@ interpreter), and exits. A fresh overlay therefore takes this path once. Runs th
 by time limit leave the game's lock in a persisted overlay in the same way a power
 cut would; use `--no-persist` for experiments.
 
+### Second workload: Crimson Skies
+
+Retail *Crimson Skies* 1.02 (Zipper Interactive, 2000; MFC, DirectDraw 4 /
+Direct3D 6, DirectShow movies), launched from an unpacked copy of the executable
+(`--exe` outside `--root`), with the Windows fonts the game uses mapped into the
+guest (`--map 'C:\WINNT\Fonts=…'`). Verified headless on the same host:
+
+| Path | Result |
+| --- | --- |
+| Start-up | EULA, the DirectX version warning (answered Ignore: the game asks for DirectX 8, Drydock is DirectX 7), the game's "Select Video Device" dialog, splash screen, Microsoft/Zipper/Aero-Tone MPEG-1 movies with sound |
+| Menus | Main menu, Preferences, Credits, Multiplayer options, pilot selection; all text drawn with the game's TrueType fonts (Andy Bold, Trebuchet MS, Bell MT, …) |
+| Instant Action | Mission list and drop-down selections, briefing, 3D flight at 1024×768 with terrain, aircraft, sky, fog, rain, HUD and gauges; keyboard flight controls and guns respond; Esc pause menu; Quit leads to the debriefing |
+| Campaign | Pilot selection, intro movie (skipped with Esc), hangar, animated briefing map with voice-over, Flight Check, first mission's launch sequence from the Pandora |
+| Speed | Menus faster than realtime. In flight the game renders 60 frames per virtual second with about 800 draw calls each and transforms and lights vertices itself on the x87; headless unthrottled runs it at about 0.7× realtime (15 s in 21.6 s), and the desktop player runs flight in slow motion (about 0.6×, dropping the lag) |
+
+Not verified: completing a mission, later campaign missions, multiplayer (DirectPlay
+is unavailable), joystick and mouse flight, saving and loading campaign progress
+across runs. Known defect: on the debriefing screen, the second line of a label the
+game wraps (such as "Danger Zones Completed") is drawn into the text bitmap but not
+shown.
+
 ## Implemented platform
 
 - **Execution:** Unicorn 2.1.5 (pinned), Pentium III CPU model, flat segments,
@@ -60,10 +81,15 @@ cut would; use `--no-persist` for experiments.
 - **user32/GDI:** windows, classes, message queues, posted/sent messages, timers,
   input messages, focus and activation, dialogs (dialog templates, buttons, statics,
   edit, combo box, list box, RichEdit with RTF text), message boxes, cursors, display
-  modes; GDI DCs, bitmaps, DIBs, BitBlt/StretchBlt, fonts and text output rasterized
-  with the bundled Liberation fonts.
+  modes, menus, accelerators, window hooks (CBT); GDI DCs, bitmaps, DIB sections,
+  palettes, BitBlt/StretchBlt with raster operations, fonts and text output
+  (DrawTextEx with margins and partial drawing) rasterized with the TrueType fonts
+  in the guest's Fonts folder when a face is installed there, else with the bundled
+  Liberation fonts.
+- **Other system DLLs:** INI profiles, FormatMessage, date and time formatting,
+  version resources (version.dll), MS ADPCM and IMA ADPCM decoding (msacm32).
 - **advapi32:** registry with `.reg` import/export, persisted in the overlay.
-- **DirectDraw 7 / 1:** display modes, primary and flip chains with vsync-retired
+- **DirectDraw 7 / 4 / 2 / 1:** display modes, primary and flip chains with vsync-retired
   flips, offscreen and texture surfaces in system/video memory, mip chains, locks,
   Blt/BltFast with colour keys and stretching, palettes, clippers, gamma ramps, GetDC,
   EnumSurfaces, DXT1/3/5 textures.
@@ -72,6 +98,13 @@ cut would; use `--no-persist` for experiments.
   transforms, alpha test and blending, fog, depth (16/24/32-bit), culling, colour
   keying, vertex buffers, DrawPrimitive/DrawIndexedPrimitive (and VB variants),
   state blocks, Device7::Load.
+- **Direct3D 6:** IDirect3D3, Device3 (legacy texture handles and blend modes),
+  Viewport3 with lights and background material, Material3, Texture2, vertex
+  buffers. Device3 leaves the x87 precision unchanged, as games of that era convert
+  colours with the 53-bit rounding trick.
+- **DirectShow:** IAMMultiMediaStream playback of MPEG-1 system streams to a
+  DirectDraw surface with audio (amstream).
+- **DirectPlay lobby:** reports that the program was not started by a lobby.
 - **DirectInput 7:** keyboard, mouse, joystick; buffered and immediate data,
   acquisition and cooperative levels.
 - **DirectSound:** primary and secondary buffers, duplication, play/write cursors on
@@ -170,6 +203,8 @@ race frames differ between Lavapipe and the Apple GPU.
 ## Open items
 
 1. Interactive speed (see Performance): busy-phase speed needs more headroom.
+   Crimson Skies flight is the heaviest case so far: about 84 % of host time is
+   emulation, dominated by softfloat x87 helpers.
    Candidates: Unicorn's software-TLB behaviour on large working sets, the per-block
    stop-check helper, moving Direct3D translation and frame submission to a render
    thread.
