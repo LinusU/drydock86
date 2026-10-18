@@ -437,8 +437,12 @@ fn get_system_metrics(s: &mut Session) -> ApiResult {
 
 fn get_sys_color(s: &mut Session) -> ApiResult {
     let [i] = s.args::<1>()?;
-    // Windows 2000 default ("Windows Standard") scheme.
-    let c: u32 = match i {
+    Ok(ApiRet::Ret(sys_color(i)))
+}
+
+/// Windows 2000 default ("Windows Standard") colour scheme.
+pub fn sys_color(i: u32) -> u32 {
+    match i {
         0 => 0xc8d0d4,
         1 => 0xa56e3a,
         2 => 0x6a240a,
@@ -462,8 +466,7 @@ fn get_sys_color(s: &mut Session) -> ApiResult {
         23 => 0x000000,
         24 => 0xe1ffff,
         _ => 0,
-    };
-    Ok(ApiRet::Ret(c))
+    }
 }
 
 // ---------------------------------------------------------------- classes

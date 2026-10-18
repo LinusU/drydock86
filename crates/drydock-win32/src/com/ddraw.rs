@@ -1629,11 +1629,11 @@ fn get_px(data: &[u8], pitch: u32, bpp: u32, x: u32, y: u32) -> u32 {
 }
 
 #[derive(Debug, Clone, Copy, Default)]
-struct BltOpts {
-    src_key: Option<ColorKey>,
-    dst_key: Option<ColorKey>,
-    mirror_lr: bool,
-    mirror_ud: bool,
+pub(crate) struct BltOpts {
+    pub src_key: Option<ColorKey>,
+    pub dst_key: Option<ColorKey>,
+    pub mirror_lr: bool,
+    pub mirror_ud: bool,
 }
 
 /// Copy a rectangle between surfaces of the same format (no keys, no stretching).
@@ -1658,7 +1658,7 @@ pub fn mip_chain(s: &Session, obj: u32) -> Vec<u32> {
 }
 
 /// CPU blit between surfaces with optional stretching (nearest) and colour keys.
-fn blit(s: &mut Session, dst: u32, dr: Rect, src: u32, sr: Rect, o: BltOpts) -> Result<(), ApiError> {
+pub(crate) fn blit(s: &mut Session, dst: u32, dr: Rect, src: u32, sr: Rect, o: BltOpts) -> Result<(), ApiError> {
     s.surface_cpu_access(src, false);
     s.surface_cpu_access(dst, true);
     let sp = s.display.surfaces[&src].clone();

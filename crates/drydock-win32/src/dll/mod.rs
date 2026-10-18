@@ -3,6 +3,7 @@
 pub mod advapi32;
 pub mod dialog;
 pub mod gdi32;
+pub mod gdi32_bitmap;
 pub mod kernel32;
 pub mod kernel32_file;
 pub mod kernel32_misc;
@@ -39,7 +40,7 @@ pub static BUILTINS: &[BuiltinDll] = &[
     ),
     dll!("NTDLL.DLL", misc::NTDLL_EXPORTS),
     dll!("USER32.DLL", user32::USER32_EXPORTS, dialog::DIALOG_EXPORTS),
-    dll!("GDI32.DLL", gdi32::GDI32_EXPORTS),
+    dll!("GDI32.DLL", gdi32::GDI32_EXPORTS, gdi32_bitmap::GDI32_BITMAP_EXPORTS),
     dll!("ADVAPI32.DLL", advapi32::ADVAPI32_EXPORTS),
     dll!("WINMM.DLL", winmm::WINMM_EXPORTS),
     dll!("SHELL32.DLL", misc::SHELL32_EXPORTS),

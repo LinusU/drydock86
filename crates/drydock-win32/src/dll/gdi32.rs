@@ -39,6 +39,13 @@ pub struct Dc {
     pub bk_mode: u32,
     pub text_align: u32,
     pub pos: (i32, i32),
+    #[serde(default)]
+    pub stretch_mode: u32,
+    #[serde(default)]
+    pub palette: u32,
+    /// States saved by SaveDC, innermost last.
+    #[serde(default)]
+    pub saved: Vec<Dc>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -79,6 +86,12 @@ pub enum GdiObj {
 pub struct GdiState {
     pub objs: BTreeMap<u32, GdiObj>,
     pub next: u32,
+    /// BITMAPINFOHEADER (and colour masks) of bitmaps created as DIB sections.
+    #[serde(default)]
+    pub dibs: BTreeMap<u32, Vec<u8>>,
+    /// Entries (0x00RRGGBB) of logical palettes.
+    #[serde(default)]
+    pub palettes: BTreeMap<u32, Vec<u32>>,
 }
 
 impl Default for GdiState {
@@ -164,11 +177,24 @@ impl Default for GdiState {
         GdiState {
             objs,
             next: 0x0101_0000,
+            dibs: BTreeMap::new(),
+            palettes: BTreeMap::new(),
         }
     }
 }
 
-const STOCK_BASE: u32 = 0x0180_0000;
+pub(crate) const STOCK_BASE: u32 = 0x0180_0000;
+const SYS_BRUSH_BASE: u32 = 0x0181_0000;
+
+/// The shared brush of system colour `i` (GetSysColorBrush). Deleting it has no effect.
+pub fn sys_color_brush(s: &mut Session, i: u32) -> u32 {
+    let h = SYS_BRUSH_BASE + i;
+    s.gdi.objs.entry(h).or_insert(GdiObj::Brush {
+        color: crate::dll::user32::sys_color(i),
+        null: false,
+    });
+    h
+}
 
 pub fn system_font(face: &str, height: i32, weight: i32) -> LogFont {
     LogFont {
@@ -186,7 +212,7 @@ pub fn system_font(face: &str, height: i32, weight: i32) -> LogFont {
 }
 
 impl GdiState {
-    fn add(&mut self, o: GdiObj) -> u32 {
+    pub fn add(&mut self, o: GdiObj) -> u32 {
         let h = self.next;
         self.next += 4;
         self.objs.insert(h, o);
@@ -198,7 +224,7 @@ impl GdiState {
             _ => None,
         }
     }
-    fn dc_mut(&mut self, h: u32) -> Option<&mut Dc> {
+    pub fn dc_mut(&mut self, h: u32) -> Option<&mut Dc> {
         match self.objs.get_mut(&h) {
             Some(GdiObj::Dc(d)) => Some(d),
             _ => None,
@@ -218,6 +244,9 @@ fn new_dc(target: DcTarget) -> Dc {
         bk_mode: 2,
         text_align: 0,
         pos: (0, 0),
+        stretch_mode: 1,
+        palette: STOCK_BASE + 15,
+        saved: Vec::new(),
     }
 }
 
@@ -256,7 +285,7 @@ pub fn release_dc(s: &mut Session) -> ApiResult {
 }
 
 /// Resolve a DC to (surface id, origin, clip rectangle in target coordinates).
-fn dc_target(s: &mut Session, hdc: u32) -> Option<(u32, (i32, i32), Rect)> {
+pub(crate) fn dc_target(s: &mut Session, hdc: u32) -> Option<(u32, (i32, i32), Rect)> {
     let dc = s.gdi.dc(hdc)?.clone();
     match dc.target {
         DcTarget::Surface(id) => {
@@ -289,7 +318,7 @@ fn colorref_to_argb(c: u32) -> u32 {
 }
 
 /// Raw pixel value for a COLORREF on a surface (nearest palette entry for P8).
-fn raw_color(s: &Session, id: u32, colorref: u32) -> u32 {
+pub(crate) fn raw_color(s: &Session, id: u32, colorref: u32) -> u32 {
     let sf = &s.display.surfaces[&id];
     let argb = colorref_to_argb(colorref);
     if sf.fmt == Fmt::P8 {
@@ -331,7 +360,7 @@ pub fn fill_rect_hdc(s: &mut Session, hdc: u32, r: &Rect, brush: u32) -> Result<
 }
 
 /// Brush colour (COLORREF); system colour brushes are `COLOR_x + 1`.
-fn brush_color(s: &Session, brush: u32) -> Option<u32> {
+pub(crate) fn brush_color(s: &Session, brush: u32) -> Option<u32> {
     if brush > 0 && brush <= 31 {
         // (HBRUSH)(COLOR_WINDOW + 1) style class brushes.
         let c: u32 = match brush - 1 {
@@ -534,9 +563,11 @@ fn select_object(s: &mut Session) -> ApiResult {
 
 fn delete_object(s: &mut Session) -> ApiResult {
     let [h] = s.args::<1>()?;
-    if (STOCK_BASE..STOCK_BASE + 32).contains(&h) {
+    if (STOCK_BASE..STOCK_BASE + 32).contains(&h) || (SYS_BRUSH_BASE..SYS_BRUSH_BASE + 32).contains(&h) {
         return Ok(ApiRet::Ret(1));
     }
+    s.gdi.dibs.remove(&h);
+    s.gdi.palettes.remove(&h);
     match s.gdi.objs.remove(&h) {
         Some(GdiObj::Bitmap { surface }) => {
             s.free_surface(surface);
