@@ -13,6 +13,7 @@ pub mod misc;
 pub mod msacm32;
 pub mod msvfw32;
 pub mod user32;
+pub mod user32_misc;
 pub mod version;
 pub mod winmm;
 
@@ -40,7 +41,12 @@ pub static BUILTINS: &[BuiltinDll] = &[
         kernel32_misc::KERNEL32_MISC_EXPORTS
     ),
     dll!("NTDLL.DLL", misc::NTDLL_EXPORTS),
-    dll!("USER32.DLL", user32::USER32_EXPORTS, dialog::DIALOG_EXPORTS),
+    dll!(
+        "USER32.DLL",
+        user32::USER32_EXPORTS,
+        dialog::DIALOG_EXPORTS,
+        user32_misc::USER32_MISC_EXPORTS
+    ),
     dll!("GDI32.DLL", gdi32::GDI32_EXPORTS, gdi32_bitmap::GDI32_BITMAP_EXPORTS),
     dll!("ADVAPI32.DLL", advapi32::ADVAPI32_EXPORTS),
     dll!("WINMM.DLL", winmm::WINMM_EXPORTS),

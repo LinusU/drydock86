@@ -254,6 +254,9 @@ pub struct Dialog {
     pub answer: Option<u32>,
 }
 
+/// A DeferWindowPos entry: (hwnd, x, y, cx, cy, flags).
+pub type DeferredPos = (u32, i32, i32, i32, i32, u32);
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct UserState {
     pub classes: BTreeMap<String, WndClass>,
@@ -281,6 +284,17 @@ pub struct UserState {
     pub controls: BTreeMap<u32, crate::dll::dialog::CtlState>,
     /// Top-level windows whose frame must be repainted.
     pub nc_dirty: Vec<u32>,
+    /// String atoms (window messages, clipboard formats, global atoms), by upper-case name.
+    #[serde(default)]
+    pub atoms: BTreeMap<String, crate::dll::user32_misc::Atom>,
+    /// Installed hooks, most recently installed first.
+    #[serde(default)]
+    pub hooks: Vec<crate::dll::user32_misc::Hook>,
+    #[serde(default)]
+    pub next_hook: u32,
+    /// Pending DeferWindowPos lists by HDWP.
+    #[serde(default)]
+    pub defer: BTreeMap<u32, Vec<DeferredPos>>,
 }
 
 impl Default for UserState {
@@ -315,6 +329,10 @@ impl Default for UserState {
             dialogs_mgr: Vec::new(),
             controls: BTreeMap::new(),
             nc_dirty: Vec::new(),
+            atoms: BTreeMap::new(),
+            hooks: Vec::new(),
+            next_hook: 0,
+            defer: BTreeMap::new(),
         }
     }
 }
@@ -471,7 +489,7 @@ pub fn sys_color(i: u32) -> u32 {
 
 // ---------------------------------------------------------------- classes
 
-fn class_key(s: &Session, name: &StrOrId) -> String {
+pub(crate) fn class_key(s: &Session, name: &StrOrId) -> String {
     match name {
         StrOrId::Str(n) => n.to_uppercase(),
         StrOrId::Id(a) => s
@@ -580,6 +598,8 @@ fn get_class_info_a(s: &mut Session) -> ApiResult {
 pub enum LParam {
     Val(u32),
     Buf(Vec<u8>),
+    /// A self-referencing buffer (see [`CallArg::BufRel`]).
+    BufRel(Vec<u8>, Vec<u32>),
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -595,6 +615,8 @@ pub enum Check {
     NcCalc(u32),
     /// Apply WM_WINDOWPOSCHANGING edits to a pending move.
     PosChanging(u32),
+    /// A WH_CBT hook returning non-zero for HCBT_CREATEWND aborts window creation.
+    CbtCreate(u32),
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -619,6 +641,12 @@ pub enum Act {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum Step {
+    /// Call a guest procedure that is not a window procedure (a hook).
+    Call {
+        target: u32,
+        args: Vec<LParam>,
+        check: Check,
+    },
     Send {
         hwnd: u32,
         msg: u32,
@@ -645,7 +673,17 @@ pub enum U32Cont {
     },
 }
 
-fn send(hwnd: u32, msg: u32, wp: u32, lp: u32) -> Step {
+impl LParam {
+    fn into_arg(self) -> CallArg {
+        match self {
+            LParam::Val(v) => CallArg::Val(v),
+            LParam::Buf(b) => CallArg::Buf(b),
+            LParam::BufRel(b, r) => CallArg::BufRel(b, r),
+        }
+    }
+}
+
+pub(crate) fn send(hwnd: u32, msg: u32, wp: u32, lp: u32) -> Step {
     Step::Send {
         hwnd,
         msg,
@@ -669,13 +707,20 @@ pub fn run_seq(s: &mut Session, mut steps: VecDeque<Step>, mut ret: u32) -> ApiR
                     continue;
                 };
                 let proc_ = w.wndproc;
-                let arg = match lp {
-                    LParam::Val(v) => CallArg::Val(v),
-                    LParam::Buf(b) => CallArg::Buf(b),
-                };
                 return Ok(ApiRet::call(
                     proc_,
-                    vec![hwnd.into(), msg.into(), wp.into(), arg],
+                    vec![hwnd.into(), msg.into(), wp.into(), lp.into_arg()],
+                    Cont::User32(U32Cont::Seq {
+                        steps,
+                        ret,
+                        last: Some(check),
+                    }),
+                ));
+            }
+            Step::Call { target, args, check } => {
+                return Ok(ApiRet::call(
+                    target,
+                    args.into_iter().map(LParam::into_arg).collect(),
                     Cont::User32(U32Cont::Seq {
                         steps,
                         ret,
@@ -875,6 +920,12 @@ pub fn resume(s: &mut Session, c: U32Cont, v: Resume) -> ApiResult {
             let r = v.eax();
             match last {
                 Some(Check::Store) => ret = r,
+                Some(Check::CbtCreate(h)) => {
+                    if r != 0 {
+                        s.user.windows.remove(&h);
+                        return Ok(ApiRet::Ret(0));
+                    }
+                }
                 Some(Check::NcCreate(h)) => {
                     if r == 0 {
                         s.user.windows.remove(&h);
@@ -961,6 +1012,26 @@ impl Session {
     }
 }
 
+/// A CREATESTRUCTA from its fields in declaration order (lpCreateParams … dwExStyle).
+pub(crate) fn create_struct(fields: [u32; 12]) -> Vec<u8> {
+    fields.iter().flat_map(|v| v.to_le_bytes()).collect()
+}
+
+/// The WH_CBT hook call (HCBT_CREATEWND) for a window being created, if a CBT hook is
+/// installed. A non-zero hook result aborts the creation.
+pub(crate) fn cbt_create_step(s: &Session, hwnd: u32, cs: &[u8]) -> Option<Step> {
+    let hook = crate::dll::user32_misc::first_hook(s, crate::dll::user32_misc::WH_CBT)?;
+    // CBT_CREATEWND { lpcs, hwndInsertAfter } followed by the CREATESTRUCT it points to.
+    let mut b = vec![0u8; 8];
+    b[0..4].copy_from_slice(&8u32.to_le_bytes());
+    b.extend_from_slice(cs);
+    Some(Step::Call {
+        target: hook,
+        args: vec![LParam::Val(3), LParam::Val(hwnd), LParam::BufRel(b, vec![0])],
+        check: Check::CbtCreate(hwnd),
+    })
+}
+
 fn create_window_ex_a(s: &mut Session) -> ApiResult {
     let [ex, cls_p, name_p, style, x, y, w, h, parent, menu, hinst, param] = s.args::<12>()?;
     let cls = s.read_str_or_id(cls_p)?;
@@ -1033,16 +1104,11 @@ fn create_window_ex_a(s: &mut Session) -> ApiResult {
     win.client = client_from_window(&win);
     s.user.windows.insert(hwnd, win);
 
-    let mut cs = vec![0u8; 48];
-    for (i, v) in [
+    let cs = create_struct([
         param, hinst, menu, parent, h as u32, w as u32, y as u32, x as u32, style, name_p, cls_p, ex,
-    ]
-    .iter()
-    .enumerate()
-    {
-        cs[i * 4..i * 4 + 4].copy_from_slice(&v.to_le_bytes());
-    }
+    ]);
     let mut steps = VecDeque::new();
+    steps.extend(cbt_create_step(s, hwnd, &cs));
     if style & WS_CHILD == 0
         && (style & WS_THICKFRAME != 0 || style & WS_CAPTION == WS_CAPTION || style & WS_POPUP == 0)
     {
@@ -1430,7 +1496,7 @@ fn get_client_rect(s: &mut Session) -> ApiResult {
     Ok(ApiRet::Ret(1))
 }
 
-fn client_origin(s: &Session, h: u32) -> (i32, i32) {
+pub(crate) fn client_origin(s: &Session, h: u32) -> (i32, i32) {
     if h == 0 || h == HWND_DESKTOP {
         return (0, 0);
     }
@@ -1472,9 +1538,26 @@ fn screen_to_client(s: &mut Session) -> ApiResult {
 }
 
 fn set_window_pos_common(s: &mut Session, hwnd: u32, x: i32, y: i32, cx: i32, cy: i32, flags: u32) -> ApiResult {
-    let Some(w) = s.window(hwnd).cloned() else {
+    if s.window(hwnd).is_none() {
         s.set_last_error(1400);
         return Ok(ApiRet::Ret(0));
+    }
+    let steps = window_pos_steps(s, hwnd, x, y, cx, cy, flags)?;
+    run_seq(s, steps, 1)
+}
+
+/// The message sequence of SetWindowPos for an existing window.
+pub(crate) fn window_pos_steps(
+    s: &mut Session,
+    hwnd: u32,
+    x: i32,
+    y: i32,
+    cx: i32,
+    cy: i32,
+    flags: u32,
+) -> Result<VecDeque<Step>, ApiError> {
+    let Some(w) = s.window(hwnd).cloned() else {
+        return Ok(VecDeque::new());
     };
     let (ox, oy) = if w.style & WS_CHILD != 0 {
         client_origin(s, w.parent)
@@ -1510,7 +1593,7 @@ fn set_window_pos_common(s: &mut Session, hwnd: u32, x: i32, y: i32, cx: i32, cy
         // !SWP_NOACTIVATE
         steps.push_back(Step::Act(Act::Activate(hwnd)));
     }
-    run_seq(s, steps, 1)
+    Ok(steps)
 }
 
 fn set_window_pos(s: &mut Session) -> ApiResult {
@@ -2015,7 +2098,7 @@ fn filter_match(m: &Msg, hwnd: u32, min: u32, max: u32, s: &Session) -> bool {
     wnd_ok && range_ok
 }
 
-fn is_descendant(s: &Session, mut h: u32, anc: u32) -> bool {
+pub(crate) fn is_descendant(s: &Session, mut h: u32, anc: u32) -> bool {
     while let Some(w) = s.user.windows.get(&h) {
         if w.parent == anc {
             return true;
@@ -2920,7 +3003,7 @@ fn wvsprintf_a(s: &mut Session) -> ApiResult {
 
 // ---------------------------------------------------------------- dialogs
 
-fn message_box_a(s: &mut Session) -> ApiResult {
+pub(crate) fn message_box_a(s: &mut Session) -> ApiResult {
     let [_hwnd, text, caption, style] = s.args::<4>()?;
     let text = s.read_str_opt(text)?.unwrap_or_default();
     let caption = s.read_str_opt(caption)?.unwrap_or_else(|| "Error".into());
