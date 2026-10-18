@@ -1006,6 +1006,20 @@ pub fn surface_destroyed(s: &mut Session, id: u32, sf: SurfObj) {
 }
 
 pub fn ddraw_destroyed(s: &mut Session, id: u32, _d: DDrawObj) {
+    // Releasing the DirectDraw object destroys every surface it created, whatever
+    // references the application still holds.
+    let owned: Vec<u32> = s
+        .com
+        .objs
+        .iter()
+        .filter(|(_, o)| matches!(&o.kind, ComKind::Surface(sf) if sf.ddraw == id && sf.parent == 0))
+        .map(|(k, _)| *k)
+        .collect();
+    for o in owned {
+        if s.com.objs.contains_key(&o) {
+            s.com_destroy_pub(o);
+        }
+    }
     if s.com.ddraw.exclusive == Some(id) {
         s.com.ddraw.exclusive = None;
         let d = s.user.desktop_mode;
