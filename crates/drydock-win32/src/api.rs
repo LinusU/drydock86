@@ -86,6 +86,10 @@ pub enum CallArg {
     Val(u32),
     /// Copied onto the guest stack below the API frame; the callee receives a pointer.
     Buf(Vec<u8>),
+    /// Like `Buf`, but the 32-bit fields at the listed byte offsets hold offsets into
+    /// the buffer that are turned into guest pointers once its address is known
+    /// (structures that point into themselves, such as CBT_CREATEWND).
+    BufRel(Vec<u8>, Vec<u32>),
 }
 
 impl From<u32> for CallArg {

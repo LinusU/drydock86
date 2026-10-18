@@ -656,6 +656,21 @@ impl Session {
                     vals.push(sp);
                     bufs.push(sp);
                 }
+                CallArg::BufRel(b, rel) => {
+                    sp -= (b.len() as u32).div_ceil(4) * 4;
+                    let mut b = b.clone();
+                    for &o in rel {
+                        let o = o as usize;
+                        let v = u32::from_le_bytes(b[o..o + 4].try_into().unwrap()).wrapping_add(sp);
+                        b[o..o + 4].copy_from_slice(&v.to_le_bytes());
+                    }
+                    if let Err(e) = self.mem.write(sp, &b) {
+                        self.halt("stack", format!("callback buffer: {e}"), None);
+                        return;
+                    }
+                    vals.push(sp);
+                    bufs.push(sp);
+                }
             }
         }
         sp &= !3;
