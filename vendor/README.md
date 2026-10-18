@@ -90,6 +90,16 @@ model never exposes it (only the invalid flag is read, by the integer conversion
 double paths off; `crates/drydock-core/tests/x87.rs` runs randomised x87 programs both
 ways and compares every result and status word.
 
+**0006: inline exit check, no JIT write toggling per block** (2026-10-18,
+`qemu/include/exec/gen-icount.h`, `qemu/accel/tcg/cpu-exec.c`)
+
+Each block began with a helper call that tests the exit request. The patch tests the
+request in translated code (a load and a branch, as upstream QEMU does) and calls the
+helper only when it is set. On Apple Silicon, `cpu_tb_exec` switched the thread
+between executable and writable around every run of translated code; it now stays
+executable, because the code generator, block chaining and cache flushes unlock for
+themselves and `restore_jit_state()` puts the thread back when `uc_emu_start` returns.
+
 To update Unicorn: replace `unicorn-engine-sys/` with the new published crate, apply
 the patches in order (`patch -p1 -d vendor < vendor/patches/0001-…`), and re-run the
 tests.

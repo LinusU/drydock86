@@ -39,8 +39,27 @@ static inline void gen_tb_start(TCGContext *tcg_ctx, TranslationBlock *tb)
     //    because it marks the end of BB
     if (tcg_ctx->delay_slot_flag != NULL) {
         tcg_gen_mov_i32(tcg_ctx, tmp, tcg_ctx->delay_slot_flag);
+        gen_helper_check_exit_request(tcg_ctx, puc, tmp);
+    } else {
+        /* Drydock (0006): test the exit request inline and call the helper
+         * (which tests it again and leaves the loop) only when it is set. */
+        TCGv_ptr pcnt = tcg_const_ptr(tcg_ctx,
+            &cpu_neg(tcg_ctx->uc->cpu)->icount_decr.u32);
+        TCGv_i32 cnt = tcg_temp_new_i32(tcg_ctx);
+        TCGLabel *go = gen_new_label(tcg_ctx);
+
+        tcg_gen_ld_i32(tcg_ctx, cnt, pcnt, 0);
+        tcg_gen_brcondi_i32(tcg_ctx, TCG_COND_GE, cnt, 0, go);
+        /* Temps do not live across the branch: make new ones. */
+        TCGv_ptr puc2 = tcg_const_ptr(tcg_ctx, tcg_ctx->uc);
+        TCGv_i32 tmp2 = tcg_const_i32(tcg_ctx, 0);
+        gen_helper_check_exit_request(tcg_ctx, puc2, tmp2);
+        tcg_temp_free_i32(tcg_ctx, tmp2);
+        tcg_temp_free_ptr(tcg_ctx, puc2);
+        gen_set_label(tcg_ctx, go);
+        tcg_temp_free_i32(tcg_ctx, cnt);
+        tcg_temp_free_ptr(tcg_ctx, pcnt);
     }
-    gen_helper_check_exit_request(tcg_ctx, puc, tmp);
     tcg_temp_free_i32(tcg_ctx, tmp);
     tcg_temp_free_ptr(tcg_ctx, puc);
 }

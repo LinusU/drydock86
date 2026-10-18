@@ -58,10 +58,9 @@ static inline tcg_target_ulong cpu_tb_exec(CPUState *cpu, TranslationBlock *itb)
     UC_TRACE_START(UC_TRACE_TB_EXEC);
     tb_exec_lock(cpu->uc);
     ret = tcg_qemu_tb_exec(env, tb_ptr);
-    if (cpu->uc->nested_level == 1) {
-        // Only unlock (allow writing to JIT area) if we are the outmost uc_emu_start
-        tb_exec_unlock(cpu->uc);
-    }
+    /* Drydock (0006): stay executable until the code generator or an API call
+     * needs to write; they unlock on their own, and restore_jit_state() puts
+     * the thread back when uc_emu_start returns. */
     UC_TRACE_END(UC_TRACE_TB_EXEC, "[uc] exec tb 0x%" PRIx64 ": ", itb->pc);
 
     cpu->can_do_io = 1;
