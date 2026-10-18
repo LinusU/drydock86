@@ -185,6 +185,18 @@ The remaining large lever is the software TLB: stores across more than about 256
 pages run at a seventh of the speed of stores within a few pages
 (`bench_stores_across_pages`); a larger initial TLB did not help the game.
 
+Crimson Skies flight (15 s of guest time from `local/cs/art/flight/flight.ddck`, headless,
+same instruction count 14,887,848,064 and 1724 frames before and after; host load 5–7, so
+figures are noisy): before the Unicorn patches 0004–0007 the segment took 24–25 s of wall
+time in the best interleaved runs (0.6× realtime); after them 15–18 s in quiet moments and
+21.7 s at the same load as the 25 s runs (0.7–1.0×). What changed: inline block counting
+instead of a hook (0004), host-double x87 add/sub/mul/div/FSTP m32 and a direct FLD m32
+(0005), inline exit-request test and no per-block JIT write toggling (0006), and a minimum
+software TLB of 4096 entries (0007; 93 million slow-path loads in 15 s fell to 1 million).
+Midtown Madness 2 `local/bench.sh 3`: 1.07× → 1.13–1.27×; `drive1` has identical
+instructions (10,721,740,919) and frames. Remaining profile: x87 helpers and FLD from
+cache-cold guest data, ~15 % API dispatch (a depth clear flushes the Direct3D batch).
+
 Indeo 5 decoding of the 332-frame intro movie (320×240) takes about 85 ms in
 total on the host (`cargo run --release -p drydock-media --example avi_frames`).
 
