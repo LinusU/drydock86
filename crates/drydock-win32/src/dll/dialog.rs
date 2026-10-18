@@ -457,6 +457,47 @@ fn create_dialog_common(
     });
     let client = s.window(hdlg).unwrap().client;
     let mut steps = VecDeque::new();
+    // The dialog window is created like any window (WC_DIALOG is atom 0x8002), then
+    // receives its font before the controls are created.
+    let r = s.window(hdlg).unwrap().rect;
+    let cs = create_struct([
+        param,
+        hinst,
+        0,
+        owner,
+        r.h() as u32,
+        r.w() as u32,
+        r.top as u32,
+        r.left as u32,
+        style,
+        0,
+        0x8002,
+        t.exstyle | WS_EX_DLGMODALFRAME,
+    ]);
+    steps.extend(cbt_create_step(s, hdlg, &cs));
+    steps.push_back(Step::Send {
+        hwnd: hdlg,
+        msg: WM_NCCREATE,
+        wp: 0,
+        lp: LParam::Buf(cs.clone()),
+        check: Check::NcCreate(hdlg),
+    });
+    steps.push_back(Step::Send {
+        hwnd: hdlg,
+        msg: WM_CREATE,
+        wp: 0,
+        lp: LParam::Buf(cs),
+        check: Check::Create(hdlg),
+    });
+    if font != 0 {
+        steps.push_back(Step::Send {
+            hwnd: hdlg,
+            msg: WM_SETFONT,
+            wp: font,
+            lp: LParam::Val(0),
+            check: Check::None,
+        });
+    }
     let mut first_tab = 0;
     for it in &t.items {
         let class = class_for_item(&it.class);
@@ -484,11 +525,27 @@ fn create_dialog_common(
             cw.style |= WS_VISIBLE;
             cw.invalid = Some(Rect::new(0, 0, r.w(), r.h()));
         }
+        let atom = s.user.classes.get(&class).map(|c| c.atom).unwrap_or(0);
+        let ccs = create_struct([
+            0,
+            hinst,
+            it.id,
+            hdlg,
+            r.h() as u32,
+            r.w() as u32,
+            (r.top - client.top) as u32,
+            (r.left - client.left) as u32,
+            it.style | WS_CHILD,
+            0,
+            atom,
+            it.exstyle | 0x4, // WS_EX_NOPARENTNOTIFY
+        ]);
+        steps.extend(cbt_create_step(s, hc, &ccs));
         steps.push_back(Step::Send {
             hwnd: hc,
             msg: WM_CREATE,
             wp: 0,
-            lp: LParam::Val(0),
+            lp: LParam::Buf(ccs),
             check: Check::None,
         });
         if font != 0 {
