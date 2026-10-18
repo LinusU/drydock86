@@ -372,40 +372,120 @@ pub fn lstrcat_a(s: &mut Session) -> ApiResult {
     Ok(ApiRet::Ret(d))
 }
 
-pub fn get_locale_info_a(s: &mut Session) -> ApiResult {
-    let [_lcid, lctype, buf, n] = s.args::<4>()?;
-    let v: String = match lctype & 0xffff {
+/// Locale data of English (United States), the emulated system's only locale.
+pub fn locale_info(lctype: u32) -> Option<String> {
+    const DAYS: [&str; 7] = [
+        "Monday",
+        "Tuesday",
+        "Wednesday",
+        "Thursday",
+        "Friday",
+        "Saturday",
+        "Sunday",
+    ];
+    const MONTHS: [&str; 12] = [
+        "January",
+        "February",
+        "March",
+        "April",
+        "May",
+        "June",
+        "July",
+        "August",
+        "September",
+        "October",
+        "November",
+        "December",
+    ];
+    let t = lctype & 0xffff;
+    Some(match t {
         0x1 => "0409".into(),                    // LOCALE_ILANGUAGE
         0x2 => "English (United States)".into(), // LOCALE_SLANGUAGE
         0x3 => "ENU".into(),                     // LOCALE_SABBREVLANGNAME
-        0x7 => "United States".into(),           // LOCALE_SCOUNTRY (SENGCOUNTRY=0x1002)
+        0x4 => "English".into(),                 // LOCALE_SNATIVELANGNAME
         0x5 => "1".into(),                       // LOCALE_ICOUNTRY
+        0x6 | 0x8 => "United States".into(),     // LOCALE_SCOUNTRY, SNATIVECTRYNAME
+        0x7 => "USA".into(),                     // LOCALE_SABBREVCTRYNAME
+        0x9 => "0409".into(),                    // LOCALE_IDEFAULTLANGUAGE
+        0xa => "1".into(),                       // LOCALE_IDEFAULTCOUNTRY
         0xb => "437".into(),                     // LOCALE_IDEFAULTCODEPAGE
         0x1004 => "1252".into(),                 // LOCALE_IDEFAULTANSICODEPAGE
         0xc => ",".into(),                       // LOCALE_SLIST
-        0xe => ".".into(),                       // LOCALE_SDECIMAL
-        0xf => ",".into(),                       // LOCALE_STHOUSAND
-        0x10 => "3;0".into(),                    // LOCALE_SGROUPING
-        0x11 => "2".into(),                      // LOCALE_IDIGITS
+        0xd => "1".into(),                       // LOCALE_IMEASURE (U.S.)
+        0xe | 0x16 => ".".into(),                // LOCALE_SDECIMAL, SMONDECIMALSEP
+        0xf | 0x17 => ",".into(),                // LOCALE_STHOUSAND, SMONTHOUSANDSEP
+        0x10 | 0x18 => "3;0".into(),             // LOCALE_SGROUPING, SMONGROUPING
+        0x11 | 0x19 | 0x1a => "2".into(),        // LOCALE_IDIGITS, ICURRDIGITS, IINTLCURRDIGITS
+        0x12 => "1".into(),                      // LOCALE_ILZERO
+        0x1010 => "1".into(),                    // LOCALE_INEGNUMBER
+        0x13 => "0123456789".into(),             // LOCALE_SNATIVEDIGITS
         0x14 => "$".into(),                      // LOCALE_SCURRENCY
+        0x15 => "USD".into(),                    // LOCALE_SINTLSYMBOL
+        0x1b => "0".into(),                      // LOCALE_ICURRENCY
+        0x1c => "0".into(),                      // LOCALE_INEGCURR
         0x1d => "/".into(),                      // LOCALE_SDATE
         0x1e => ":".into(),                      // LOCALE_STIME
         0x1f => "M/d/yyyy".into(),               // LOCALE_SSHORTDATE
         0x20 => "dddd, MMMM dd, yyyy".into(),    // LOCALE_SLONGDATE
-        0x1001 => "English".into(),              // LOCALE_SENGLANGUAGE
-        0x1002 => "United States".into(),        // LOCALE_SENGCOUNTRY
-        0x59 => "en".into(),                     // LOCALE_SISO639LANGNAME
-        0x5a => "US".into(),                     // LOCALE_SISO3166CTRYNAME
-        t => {
-            s.missing("GetLocaleInfo", format!("LCTYPE {t:#x}"));
-            s.set_last_error(ERROR_INVALID_PARAMETER);
-            return Ok(ApiRet::Ret(0));
-        }
+        0x1003 => "h:mm:ss tt".into(),           // LOCALE_STIMEFORMAT
+        0x21 | 0x22 => "0".into(),               // LOCALE_IDATE, ILDATE (month-day-year)
+        0x23 => "0".into(),                      // LOCALE_ITIME (12-hour)
+        0x1005 => "0".into(),                    // LOCALE_ITIMEMARKPOSN
+        0x24 => "1".into(),                      // LOCALE_ICENTURY
+        0x25..=0x27 => "0".into(),               // LOCALE_ITLZERO, IDAYLZERO, IMONLZERO
+        0x28 => "AM".into(),                     // LOCALE_S1159
+        0x29 => "PM".into(),                     // LOCALE_S2359
+        0x1009 => "1".into(),                    // LOCALE_ICALENDARTYPE (Gregorian)
+        0x100b => "0".into(),                    // LOCALE_IOPTIONALCALENDAR
+        0x100c => "6".into(),                    // LOCALE_IFIRSTDAYOFWEEK (Sunday)
+        0x100d => "0".into(),                    // LOCALE_IFIRSTWEEKOFYEAR
+        0x2a..=0x30 => DAYS[(t - 0x2a) as usize].into(),
+        0x31..=0x37 => DAYS[(t - 0x31) as usize][..3].into(),
+        0x38..=0x43 => MONTHS[(t - 0x38) as usize].into(),
+        0x44..=0x4f => MONTHS[(t - 0x44) as usize][..3].into(),
+        0x50 => String::new(),            // LOCALE_SPOSITIVESIGN
+        0x51 => "-".into(),               // LOCALE_SNEGATIVESIGN
+        0x52 | 0x53 => "3".into(),        // LOCALE_IPOSSIGNPOSN, INEGSIGNPOSN
+        0x54 | 0x56 => "1".into(),        // LOCALE_IPOSSYMPRECEDES, INEGSYMPRECEDES
+        0x55 | 0x57 => "0".into(),        // LOCALE_IPOSSEPBYSPACE, INEGSEPBYSPACE
+        0x1001 => "English".into(),       // LOCALE_SENGLANGUAGE
+        0x1002 => "United States".into(), // LOCALE_SENGCOUNTRY
+        0x59 => "en".into(),              // LOCALE_SISO639LANGNAME
+        0x5a => "US".into(),              // LOCALE_SISO3166CTRYNAME
+        _ => return None,
+    })
+}
+
+pub fn get_locale_info_a(s: &mut Session) -> ApiResult {
+    let [_lcid, lctype, buf, n] = s.args::<4>()?;
+    let Some(v) = locale_info(lctype) else {
+        s.missing("GetLocaleInfo", format!("LCTYPE {lctype:#x}"));
+        s.set_last_error(ERROR_INVALID_PARAMETER);
+        return Ok(ApiRet::Ret(0));
     };
     if n == 0 {
-        return Ok(ApiRet::Ret(v.len() as u32 + 1));
+        return Ok(ApiRet::Ret(crate::strings::encode_ansi(&v).len() as u32 + 1));
     }
     match s.write_str_buf(buf, n, &v)? {
+        Ok(len) => Ok(ApiRet::Ret(len + 1)),
+        Err(_) => {
+            s.set_last_error(ERROR_INSUFFICIENT_BUFFER);
+            Ok(ApiRet::Ret(0))
+        }
+    }
+}
+
+pub fn get_locale_info_w(s: &mut Session) -> ApiResult {
+    let [_lcid, lctype, buf, n] = s.args::<4>()?;
+    let Some(v) = locale_info(lctype) else {
+        s.missing("GetLocaleInfo", format!("LCTYPE {lctype:#x}"));
+        s.set_last_error(ERROR_INVALID_PARAMETER);
+        return Ok(ApiRet::Ret(0));
+    };
+    if n == 0 {
+        return Ok(ApiRet::Ret(v.encode_utf16().count() as u32 + 1));
+    }
+    match s.write_wstr_buf(buf, n, &v)? {
         Ok(len) => Ok(ApiRet::Ret(len + 1)),
         Err(_) => {
             s.set_last_error(ERROR_INSUFFICIENT_BUFFER);
