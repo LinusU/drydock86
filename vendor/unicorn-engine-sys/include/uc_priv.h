@@ -432,6 +432,14 @@ struct uc_struct {
     bool thread_executable_entry;
     bool current_executable;
     bool skip_sync_pc_on_exit;
+    // Drydock (0004): inline block counting. When fc_insns is set, translated
+    // blocks add their instruction count to *fc_insns (and one to *fc_blocks)
+    // unless *fc_insns >= *fc_limit, in which case emulation stops. Translated
+    // pages are recorded in the bitset fc_code_pages (1 << 20 bits).
+    uint64_t *fc_insns;
+    uint64_t *fc_limit;
+    uint64_t *fc_blocks;
+    uint64_t *fc_code_pages;
 };
 
 // Metadata stub for the variable-size cpu context used with uc_context_*()

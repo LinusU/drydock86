@@ -40,6 +40,7 @@ void translator_loop(const TranslatorOps *ops, DisasContextBase *db,
     TCGContext *tcg_ctx = uc->tcg_ctx;
     TCGOp *prev_op = NULL;
     bool block_hook = false;
+    TCGOp *count_op = NULL;
 
     /* Initialize DisasContext */
     db->tb = tb;
@@ -73,7 +74,50 @@ void translator_loop(const TranslatorOps *ops, DisasContextBase *db,
      * Only hook this block if it is not broken from previous translation due to
      * full translation cache
      */
-    if (HOOK_EXISTS_BOUNDED(uc, UC_HOOK_BLOCK, tb->pc)) {
+    if (uc->fc_insns) {
+        /* Drydock: count the block inline instead of calling a hook (0004). */
+        TCGv_ptr pins = tcg_const_ptr(tcg_ctx, uc->fc_insns);
+        TCGv_ptr plim = tcg_const_ptr(tcg_ctx, uc->fc_limit);
+        TCGv_i64 cur = tcg_temp_new_i64(tcg_ctx);
+        TCGv_i64 lim = tcg_temp_new_i64(tcg_ctx);
+        TCGLabel *stop = gen_new_label(tcg_ctx);
+        TCGLabel *done = gen_new_label(tcg_ctx);
+
+        ops->pc_sync(db, cpu);
+        tcg_gen_ld_i64(tcg_ctx, cur, pins, 0);
+        tcg_gen_ld_i64(tcg_ctx, lim, plim, 0);
+        tcg_gen_brcond_i64(tcg_ctx, TCG_COND_GEU, cur, lim, stop);
+
+        /* Temps do not live across the branch: reload and count. */
+        TCGv_ptr pins2 = tcg_const_ptr(tcg_ctx, uc->fc_insns);
+        TCGv_ptr pblk = tcg_const_ptr(tcg_ctx, uc->fc_blocks);
+        TCGv_i64 cnt = tcg_temp_new_i64(tcg_ctx);
+        TCGv_i64 blk = tcg_temp_new_i64(tcg_ctx);
+        TCGv_i64 n = tcg_const_i64(tcg_ctx, 0xf8f8f8f8);
+        count_op = tcg_last_op(tcg_ctx);
+        tcg_gen_ld_i64(tcg_ctx, cnt, pins2, 0);
+        tcg_gen_add_i64(tcg_ctx, cnt, cnt, n);
+        tcg_gen_st_i64(tcg_ctx, cnt, pins2, 0);
+        tcg_gen_ld_i64(tcg_ctx, blk, pblk, 0);
+        tcg_gen_addi_i64(tcg_ctx, blk, blk, 1);
+        tcg_gen_st_i64(tcg_ctx, blk, pblk, 0);
+        tcg_gen_br(tcg_ctx, done);
+
+        gen_set_label(tcg_ctx, stop);
+        TCGv_ptr puc = tcg_const_ptr(tcg_ctx, uc);
+        gen_helper_icount_stop(tcg_ctx, puc);
+        gen_set_label(tcg_ctx, done);
+        tcg_temp_free_ptr(tcg_ctx, puc);
+        tcg_temp_free_i64(tcg_ctx, n);
+        tcg_temp_free_i64(tcg_ctx, blk);
+        tcg_temp_free_i64(tcg_ctx, cnt);
+        tcg_temp_free_ptr(tcg_ctx, pblk);
+        tcg_temp_free_ptr(tcg_ctx, pins2);
+        tcg_temp_free_i64(tcg_ctx, lim);
+        tcg_temp_free_i64(tcg_ctx, cur);
+        tcg_temp_free_ptr(tcg_ctx, plim);
+        tcg_temp_free_ptr(tcg_ctx, pins);
+    } else if (HOOK_EXISTS_BOUNDED(uc, UC_HOOK_BLOCK, tb->pc)) {
         ops->pc_sync(db, cpu);
         prev_op = tcg_last_op(tcg_ctx);
         block_hook = true;
@@ -149,6 +193,18 @@ _end_loop:
     db->tb->icount = db->num_insns;
 
     hooked_regions_check(uc, db->tb->pc, db->tb->size);
+
+    if (count_op) {
+        /* Drydock (0004): patch in the block's instruction count and record
+         * the pages that hold translated code. */
+        uint32_t first = db->tb->pc >> 12;
+        uint32_t last = (db->tb->pc + (db->tb->size ? db->tb->size : 1) - 1) >> 12;
+        uint32_t pg;
+        count_op->args[1] = db->tb->icount;
+        for (pg = first; pg <= last; pg++) {
+            uc->fc_code_pages[(pg & 0xfffff) >> 6] |= UINT64_C(1) << (pg & 63);
+        }
+    }
 
     if (block_hook) {
         TCGOp *tcg_op;

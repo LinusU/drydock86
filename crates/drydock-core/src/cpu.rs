@@ -162,12 +162,25 @@ impl Regs {
 pub struct Cpu {
     pub uc: Unicorn<'static, HookState>,
     rdtsc_hook: unicorn_engine::uc_hook,
+    /// The counting callback while a block trace is recorded (0 otherwise).
+    block_hook: unicorn_engine::uc_hook,
     /// Base of the FS descriptor currently loaded (the running thread's TEB).
     fs_base: u32,
 }
 
 fn uc_err(e: uc_error) -> String {
     format!("{e:?}")
+}
+
+unsafe extern "C" {
+    /// Vendored Unicorn (0004): enable inline block counting; null `insns` disables it.
+    fn uc_drydock_fast_count(
+        uc: *mut unicorn_engine::uc_engine,
+        insns: *mut u64,
+        limit: *mut u64,
+        blocks: *mut u64,
+        code_pages: *mut u64,
+    );
 }
 
 unsafe extern "C" fn block_cb(uc: *mut unicorn_engine::uc_engine, address: u64, size: u32, user: *mut c_void) {
@@ -283,6 +296,7 @@ impl Cpu {
         let mut cpu = Cpu {
             uc,
             rdtsc_hook: 0,
+            block_hook: 0,
             fs_base: 0,
         };
         cpu.install_rdtsc_hook()?;
@@ -290,9 +304,23 @@ impl Cpu {
         Ok(cpu)
     }
 
-    /// Count instructions per block. Registered as a plain C callback: this runs for
-    /// every executed block, and the generic Rust hook trampoline costs noticeably more.
+    /// Count instructions per block. The vendored Unicorn does this inline in the
+    /// translated code (vendor/patches/0004), without a callback; the counters, the
+    /// budget limit and the code-page bitset live in `HookState`.
     fn install_block_hook(&mut self) -> Result<(), String> {
+        let st = self.uc.get_data_mut();
+        let (i, l, b, p) = (
+            &raw mut st.insns,
+            &raw mut st.insn_limit,
+            &raw mut st.blocks,
+            st.code_pages.as_mut_ptr(),
+        );
+        unsafe { uc_drydock_fast_count(self.uc.get_handle(), i, l, b, p) };
+        Ok(())
+    }
+
+    /// Count through a callback instead, which can also record a block trace.
+    fn install_block_callback(&mut self) -> Result<(), String> {
         let user = self.uc.get_data_mut() as *mut HookState as *mut c_void;
         let mut hh: unicorn_engine::uc_hook = 0;
         let err = unsafe {
@@ -309,6 +337,7 @@ impl Cpu {
         if err != uc_error::OK {
             return Err(format!("block hook: {err:?}"));
         }
+        self.block_hook = hh;
         Ok(())
     }
 
@@ -552,6 +581,8 @@ impl Cpu {
             return Ok(s);
         }
         match res {
+            // Inline block counting stops without recording why.
+            Ok(()) if st.insns >= st.insn_limit => Ok(Stop::Budget),
             Ok(()) => Ok(Stop::Requested),
             Err(e) => Ok(Stop::Fault(self.fault_from_error(mem, e))),
         }
@@ -746,7 +777,7 @@ impl Cpu {
     }
 
     /// Enable/disable the bounded block trace.
-    pub fn set_trace(&mut self, cap: usize) {
+    pub fn set_trace(&mut self, cap: usize) -> Result<(), String> {
         let st = self.uc.get_data_mut();
         st.trace_cap = cap;
         st.trace = if cap > 0 {
@@ -754,6 +785,26 @@ impl Cpu {
         } else {
             None
         };
+        // Tracing needs the callback; translated code must be regenerated to switch.
+        if cap > 0 && self.block_hook == 0 {
+            unsafe {
+                uc_drydock_fast_count(
+                    self.uc.get_handle(),
+                    std::ptr::null_mut(),
+                    std::ptr::null_mut(),
+                    std::ptr::null_mut(),
+                    std::ptr::null_mut(),
+                )
+            };
+            self.install_block_callback()?;
+            self.flush_all_code()?;
+        } else if cap == 0 && self.block_hook != 0 {
+            unsafe { unicorn_engine::uc_hook_del(self.uc.get_handle(), self.block_hook) };
+            self.block_hook = 0;
+            self.install_block_hook()?;
+            self.flush_all_code()?;
+        }
+        Ok(())
     }
 
     /// Pages (4 KiB page numbers) that have held translated code since the last full flush.

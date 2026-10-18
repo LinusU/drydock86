@@ -165,6 +165,11 @@ void HELPER(exit_atomic)(CPUArchState *env)
     cpu_loop_exit_atomic(env_cpu(env), GETPC());
 }
 
+void HELPER(icount_stop)(void *p)
+{
+    uc_emu_stop((uc_engine *)p);
+}
+
 void HELPER(check_exit_request)(void *p, uint32_t in_delay_slot) {
     uc_engine *uc = p;
 

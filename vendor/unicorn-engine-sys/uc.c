@@ -1253,6 +1253,18 @@ uc_err uc_emu_start(uc_engine *uc, uint64_t begin, uint64_t until,
     return err;
 }
 
+// Drydock (0004): enable (non-NULL pointers) or disable (insns == NULL) inline
+// block counting. Translated code must be flushed after changing it.
+UNICORN_EXPORT
+void uc_drydock_fast_count(uc_engine *uc, uint64_t *insns, uint64_t *limit,
+                           uint64_t *blocks, uint64_t *code_pages)
+{
+    uc->fc_insns = insns;
+    uc->fc_limit = limit;
+    uc->fc_blocks = blocks;
+    uc->fc_code_pages = code_pages;
+}
+
 UNICORN_EXPORT
 uc_err uc_emu_stop(uc_engine *uc)
 {

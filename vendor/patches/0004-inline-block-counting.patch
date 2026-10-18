@@ -1,0 +1,167 @@
+diff --git a/unicorn-engine-sys/include/uc_priv.h b/unicorn-engine-sys/include/uc_priv.h
+index c3132dc..d3bec83 100644
+--- a/unicorn-engine-sys/include/uc_priv.h
++++ b/unicorn-engine-sys/include/uc_priv.h
+@@ -432,6 +432,14 @@ struct uc_struct {
+     bool thread_executable_entry;
+     bool current_executable;
+     bool skip_sync_pc_on_exit;
++    // Drydock (0004): inline block counting. When fc_insns is set, translated
++    // blocks add their instruction count to *fc_insns (and one to *fc_blocks)
++    // unless *fc_insns >= *fc_limit, in which case emulation stops. Translated
++    // pages are recorded in the bitset fc_code_pages (1 << 20 bits).
++    uint64_t *fc_insns;
++    uint64_t *fc_limit;
++    uint64_t *fc_blocks;
++    uint64_t *fc_code_pages;
+ };
+ 
+ // Metadata stub for the variable-size cpu context used with uc_context_*()
+diff --git a/unicorn-engine-sys/qemu/accel/tcg/tcg-runtime.c b/unicorn-engine-sys/qemu/accel/tcg/tcg-runtime.c
+index 777287a..f259b8e 100644
+--- a/unicorn-engine-sys/qemu/accel/tcg/tcg-runtime.c
++++ b/unicorn-engine-sys/qemu/accel/tcg/tcg-runtime.c
+@@ -165,6 +165,11 @@ void HELPER(exit_atomic)(CPUArchState *env)
+     cpu_loop_exit_atomic(env_cpu(env), GETPC());
+ }
+ 
++void HELPER(icount_stop)(void *p)
++{
++    uc_emu_stop((uc_engine *)p);
++}
++
+ void HELPER(check_exit_request)(void *p, uint32_t in_delay_slot) {
+     uc_engine *uc = p;
+ 
+diff --git a/unicorn-engine-sys/qemu/accel/tcg/tcg-runtime.h b/unicorn-engine-sys/qemu/accel/tcg/tcg-runtime.h
+index 8ba10e1..e066ec3 100644
+--- a/unicorn-engine-sys/qemu/accel/tcg/tcg-runtime.h
++++ b/unicorn-engine-sys/qemu/accel/tcg/tcg-runtime.h
+@@ -260,4 +260,5 @@ DEF_HELPER_FLAGS_4(gvec_leu64, TCG_CALL_NO_RWG, void, ptr, ptr, ptr, i32)
+ 
+ DEF_HELPER_FLAGS_5(gvec_bitsel, TCG_CALL_NO_RWG, void, ptr, ptr, ptr, ptr, i32)
+ 
+-DEF_HELPER_2(check_exit_request, void, ptr, i32)
+\ No newline at end of file
++DEF_HELPER_2(check_exit_request, void, ptr, i32)
++DEF_HELPER_1(icount_stop, void, ptr)
+\ No newline at end of file
+diff --git a/unicorn-engine-sys/qemu/accel/tcg/translator.c b/unicorn-engine-sys/qemu/accel/tcg/translator.c
+index c29e332..3221bf0 100644
+--- a/unicorn-engine-sys/qemu/accel/tcg/translator.c
++++ b/unicorn-engine-sys/qemu/accel/tcg/translator.c
+@@ -40,6 +40,7 @@ void translator_loop(const TranslatorOps *ops, DisasContextBase *db,
+     TCGContext *tcg_ctx = uc->tcg_ctx;
+     TCGOp *prev_op = NULL;
+     bool block_hook = false;
++    TCGOp *count_op = NULL;
+ 
+     /* Initialize DisasContext */
+     db->tb = tb;
+@@ -73,7 +74,50 @@ void translator_loop(const TranslatorOps *ops, DisasContextBase *db,
+      * Only hook this block if it is not broken from previous translation due to
+      * full translation cache
+      */
+-    if (HOOK_EXISTS_BOUNDED(uc, UC_HOOK_BLOCK, tb->pc)) {
++    if (uc->fc_insns) {
++        /* Drydock: count the block inline instead of calling a hook (0004). */
++        TCGv_ptr pins = tcg_const_ptr(tcg_ctx, uc->fc_insns);
++        TCGv_ptr plim = tcg_const_ptr(tcg_ctx, uc->fc_limit);
++        TCGv_i64 cur = tcg_temp_new_i64(tcg_ctx);
++        TCGv_i64 lim = tcg_temp_new_i64(tcg_ctx);
++        TCGLabel *stop = gen_new_label(tcg_ctx);
++        TCGLabel *done = gen_new_label(tcg_ctx);
++
++        ops->pc_sync(db, cpu);
++        tcg_gen_ld_i64(tcg_ctx, cur, pins, 0);
++        tcg_gen_ld_i64(tcg_ctx, lim, plim, 0);
++        tcg_gen_brcond_i64(tcg_ctx, TCG_COND_GEU, cur, lim, stop);
++
++        /* Temps do not live across the branch: reload and count. */
++        TCGv_ptr pins2 = tcg_const_ptr(tcg_ctx, uc->fc_insns);
++        TCGv_ptr pblk = tcg_const_ptr(tcg_ctx, uc->fc_blocks);
++        TCGv_i64 cnt = tcg_temp_new_i64(tcg_ctx);
++        TCGv_i64 blk = tcg_temp_new_i64(tcg_ctx);
++        TCGv_i64 n = tcg_const_i64(tcg_ctx, 0xf8f8f8f8);
++        count_op = tcg_last_op(tcg_ctx);
++        tcg_gen_ld_i64(tcg_ctx, cnt, pins2, 0);
++        tcg_gen_add_i64(tcg_ctx, cnt, cnt, n);
++        tcg_gen_st_i64(tcg_ctx, cnt, pins2, 0);
++        tcg_gen_ld_i64(tcg_ctx, blk, pblk, 0);
++        tcg_gen_addi_i64(tcg_ctx, blk, blk, 1);
++        tcg_gen_st_i64(tcg_ctx, blk, pblk, 0);
++        tcg_gen_br(tcg_ctx, done);
++
++        gen_set_label(tcg_ctx, stop);
++        TCGv_ptr puc = tcg_const_ptr(tcg_ctx, uc);
++        gen_helper_icount_stop(tcg_ctx, puc);
++        gen_set_label(tcg_ctx, done);
++        tcg_temp_free_ptr(tcg_ctx, puc);
++        tcg_temp_free_i64(tcg_ctx, n);
++        tcg_temp_free_i64(tcg_ctx, blk);
++        tcg_temp_free_i64(tcg_ctx, cnt);
++        tcg_temp_free_ptr(tcg_ctx, pblk);
++        tcg_temp_free_ptr(tcg_ctx, pins2);
++        tcg_temp_free_i64(tcg_ctx, lim);
++        tcg_temp_free_i64(tcg_ctx, cur);
++        tcg_temp_free_ptr(tcg_ctx, plim);
++        tcg_temp_free_ptr(tcg_ctx, pins);
++    } else if (HOOK_EXISTS_BOUNDED(uc, UC_HOOK_BLOCK, tb->pc)) {
+         ops->pc_sync(db, cpu);
+         prev_op = tcg_last_op(tcg_ctx);
+         block_hook = true;
+@@ -150,6 +194,18 @@ _end_loop:
+ 
+     hooked_regions_check(uc, db->tb->pc, db->tb->size);
+ 
++    if (count_op) {
++        /* Drydock (0004): patch in the block's instruction count and record
++         * the pages that hold translated code. */
++        uint32_t first = db->tb->pc >> 12;
++        uint32_t last = (db->tb->pc + (db->tb->size ? db->tb->size : 1) - 1) >> 12;
++        uint32_t pg;
++        count_op->args[1] = db->tb->icount;
++        for (pg = first; pg <= last; pg++) {
++            uc->fc_code_pages[(pg & 0xfffff) >> 6] |= UINT64_C(1) << (pg & 63);
++        }
++    }
++
+     if (block_hook) {
+         TCGOp *tcg_op;
+ 
+diff --git a/unicorn-engine-sys/qemu/x86_64.h b/unicorn-engine-sys/qemu/x86_64.h
+index 637b885..031f6a6 100644
+--- a/unicorn-engine-sys/qemu/x86_64.h
++++ b/unicorn-engine-sys/qemu/x86_64.h
+@@ -5,6 +5,8 @@
+ #define UNICORN_ARCH_POSTFIX _x86_64
+ #endif
+ #define gen_helper_check_exit_request gen_helper_check_exit_request_x86_64
++#define gen_helper_icount_stop gen_helper_icount_stop_x86_64
++#define icount_stop icount_stop_x86_64
+ #define unicorn_fill_tlb unicorn_fill_tlb_x86_64
+ #define reg_read reg_read_x86_64
+ #define reg_write reg_write_x86_64
+diff --git a/unicorn-engine-sys/uc.c b/unicorn-engine-sys/uc.c
+index 75b89a0..0e39f82 100644
+--- a/unicorn-engine-sys/uc.c
++++ b/unicorn-engine-sys/uc.c
+@@ -1253,6 +1253,18 @@ uc_err uc_emu_start(uc_engine *uc, uint64_t begin, uint64_t until,
+     return err;
+ }
+ 
++// Drydock (0004): enable (non-NULL pointers) or disable (insns == NULL) inline
++// block counting. Translated code must be flushed after changing it.
++UNICORN_EXPORT
++void uc_drydock_fast_count(uc_engine *uc, uint64_t *insns, uint64_t *limit,
++                           uint64_t *blocks, uint64_t *code_pages)
++{
++    uc->fc_insns = insns;
++    uc->fc_limit = limit;
++    uc->fc_blocks = blocks;
++    uc->fc_code_pages = code_pages;
++}
++
+ UNICORN_EXPORT
+ uc_err uc_emu_stop(uc_engine *uc)
+ {

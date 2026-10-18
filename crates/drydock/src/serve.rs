@@ -435,7 +435,7 @@ impl Server {
                     s.diag.trace_filter.include = api.into_iter().filter(|t| t != "*").collect();
                 }
                 let blocks = p.get("blocks").and_then(|v| v.as_u64()).unwrap_or(0) as usize;
-                s.cpu.set_trace(blocks);
+                let _ = s.cpu.set_trace(blocks);
                 Ok(json!({}))
             }
             "trace.get" => {

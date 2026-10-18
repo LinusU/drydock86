@@ -5,6 +5,8 @@
 #define UNICORN_ARCH_POSTFIX _x86_64
 #endif
 #define gen_helper_check_exit_request gen_helper_check_exit_request_x86_64
+#define gen_helper_icount_stop gen_helper_icount_stop_x86_64
+#define icount_stop icount_stop_x86_64
 #define unicorn_fill_tlb unicorn_fill_tlb_x86_64
 #define reg_read reg_read_x86_64
 #define reg_write reg_write_x86_64

@@ -62,6 +62,19 @@ instruction-counting hook no longer decodes blocks or keeps a cache of counts.
 Blocks are smaller than 64 KiB and hold at most 512 instructions, so both fit.
 Counts are identical to the previous decode-based ones on the acceptance workload.
 
+**0004: inline block counting** (2026-10-18, `qemu/accel/tcg/translator.c`,
+`qemu/accel/tcg/tcg-runtime.{c,h}`, `qemu/x86_64.h`, `include/uc_priv.h`, `uc.c`)
+
+Drydock counted instructions in a block hook, a C callback per executed block. The
+patch adds `uc_drydock_fast_count()`: given pointers to an instruction counter, a limit,
+a block counter and a bitset of code pages, the translator emits the counting as TCG
+operations at the start of each block (load, compare with the limit, add the block's
+instruction count, store) and calls a helper that stops emulation when the limit is
+reached, in which case the block is neither entered nor counted, as before. The pages
+holding translated code are recorded at translation time instead of at each execution.
+With a null counter pointer the block hook works as before (Drydock uses it to record a
+block trace). Counts, frames and stops are identical to the hook-based version.
+
 To update Unicorn: replace `unicorn-engine-sys/` with the new published crate, apply
 the patches in order (`patch -p1 -d vendor < vendor/patches/0001-…`), and re-run the
 tests.
