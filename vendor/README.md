@@ -100,6 +100,15 @@ between executable and writable around every run of translated code; it now stay
 executable, because the code generator, block chaining and cache flushes unlock for
 themselves and `restore_jit_state()` puts the thread back when `uc_emu_start` returns.
 
+**0007: larger minimum software TLB** (2026-10-18, `qemu/include/exec/cpu-defs.h`)
+
+Unicorn shrinks the direct-mapped TLB to the number of entries recently in use, with a
+minimum of 64. For a working set of a few hundred pages that leaves hot pages that share
+a slot (addresses a multiple of the TLB size apart) evicting each other on every access:
+Crimson Skies in flight took 93 million slow-path loads in 15 s of guest time, almost all
+for five pages. The minimum is now 4096 entries (128 KiB per MMU mode), which brings that
+to about one million. Results are unchanged.
+
 To update Unicorn: replace `unicorn-engine-sys/` with the new published crate, apply
 the patches in order (`patch -p1 -d vendor < vendor/patches/0001-…`), and re-run the
 tests.
