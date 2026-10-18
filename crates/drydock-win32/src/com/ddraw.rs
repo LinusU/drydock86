@@ -82,6 +82,8 @@ pub const DDSCL_FULLSCREEN: u32 = 0x1;
 pub const DDSCL_NORMAL: u32 = 0x8;
 pub const DDSCL_EXCLUSIVE: u32 = 0x10;
 pub const DDSCL_FPUPRESERVE: u32 = 0x1000;
+/// Busy answers a polling Flip gets before it waits for the vertical blank itself.
+const FLIP_POLLS_BEFORE_WAIT: u32 = 4;
 pub const DDSCL_FPUSETUP: u32 = 0x800;
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
@@ -93,6 +95,9 @@ pub struct DDrawGlobal {
     pub primary: Option<u32>,
     /// Virtual time at which the pending flip is retired (next vblank).
     pub flip_pending_until: Option<u64>,
+    /// Flip calls without DDFLIP_WAIT answered "still drawing" since the last flip.
+    #[serde(default)]
+    pub flip_busy_polls: u32,
     /// Number of display mode changes (surfaces created before a change are lost).
     pub mode_epoch: u32,
     pub gamma: Vec<u16>,
@@ -1356,8 +1361,12 @@ fn sf_flip(s: &mut Session) -> ApiResult {
         && now < until
         && !novsync
     {
-        if flags & 0x1 == 0 {
-            // !DDFLIP_WAIT
+        // Without DDFLIP_WAIT the caller polls, usually by running its whole main loop
+        // again. After a few polls, wait for the vertical blank in this call instead (as
+        // if the flip was slow to return): the program sees the same outcome without
+        // spending the rest of the frame in emulated busy work.
+        if flags & 0x1 == 0 && s.com.ddraw.flip_busy_polls < FLIP_POLLS_BEFORE_WAIT {
+            s.com.ddraw.flip_busy_polls += 1;
             return Ok(ApiRet::Ret(DDERR_WASSTILLDRAWING));
         }
         // Wait for the previous flip to be retired, then flip (re-run this method).
@@ -1395,6 +1404,7 @@ fn sf_flip(s: &mut Session) -> ApiResult {
         s.display.front = front;
     }
     s.com.ddraw.flip_pending_until = if novsync { None } else { Some(s.next_vblank()) };
+    s.com.ddraw.flip_busy_polls = 0;
     let _ = id;
     present(s);
     Ok(ApiRet::Ret(DD_OK))
