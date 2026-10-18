@@ -1698,7 +1698,7 @@ fn blit(s: &mut Session, dst: u32, dr: Rect, src: u32, sr: Rect, o: BltOpts) -> 
         if o.mirror_ud {
             sy = sr.bottom - 1 - (sy - sr.top);
         }
-        let row_addr = dp.mem + dy as u32 * dp.pitch + dr.left.max(0) as u32 * db;
+        let row_addr = dp.row_addr(dy as u32) + dr.left.max(0) as u32 * db;
         let x0 = (-dr.left).max(0);
         let x1 = dw.min(dp.w as i32 - dr.left);
         if x1 <= x0 {
@@ -1714,7 +1714,8 @@ fn blit(s: &mut Session, dst: u32, dr: Rect, src: u32, sr: Rect, o: BltOpts) -> 
             if o.mirror_lr {
                 sx = sr.right - 1 - (sx - sr.left);
             }
-            let v = get_px(&src_data, sp.pitch, sb, sx as u32, sy as u32);
+            let srow = if sp.bottom_up { sp.h - 1 - sy as u32 } else { sy as u32 };
+            let v = get_px(&src_data, sp.pitch, sb, sx as u32, srow);
             if let Some(k) = o.src_key
                 && v >= k.low
                 && v <= k.high

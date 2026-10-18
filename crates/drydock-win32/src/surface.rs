@@ -233,6 +233,20 @@ pub struct Surface {
     pub dcs: u32,
     /// Bumped whenever the CPU-side contents change (for texture caches).
     pub version: u64,
+    /// Rows are stored bottom row first (GDI DIB sections with a positive height).
+    #[serde(default)]
+    pub bottom_up: bool,
+}
+
+impl Surface {
+    /// Guest address of row `y` (0 = top row).
+    pub fn row_addr(&self, y: u32) -> u32 {
+        if self.bottom_up {
+            self.mem + (self.h - 1 - y) * self.pitch
+        } else {
+            self.mem + y * self.pitch
+        }
+    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -308,6 +322,7 @@ impl Session {
                 locks: 0,
                 dcs: 0,
                 version: 0,
+                bottom_up: false,
             },
         );
         Ok(id)
@@ -372,7 +387,7 @@ impl Session {
         let bpp = sf.fmt.bytes_pp() as usize;
         let mut out = Vec::with_capacity((sf.w * sf.h) as usize);
         for y in 0..sf.h as usize {
-            let row = &data[y * sf.pitch as usize..];
+            let row = &data[(sf.row_addr(y as u32) - sf.mem) as usize..];
             for x in 0..sf.w as usize {
                 out.push(sf.fmt.decode(&row[x * bpp..x * bpp + bpp], pal.as_ref()));
             }
@@ -421,6 +436,7 @@ pub struct PixelTarget {
     pub h: u32,
     pub pitch: u32,
     pub fmt: Fmt,
+    pub bottom_up: bool,
 }
 
 impl PixelTarget {
@@ -431,6 +447,7 @@ impl PixelTarget {
             h: sf.h,
             pitch: sf.pitch,
             fmt: sf.fmt,
+            bottom_up: sf.bottom_up,
         }
     }
 
@@ -448,7 +465,12 @@ impl PixelTarget {
             row[x * bpp..x * bpp + bpp].copy_from_slice(&bytes[..bpp]);
         }
         for y in r.top..r.bottom {
-            let a = self.mem + y as u32 * self.pitch + r.left as u32 * bpp as u32;
+            let ry = if self.bottom_up {
+                self.h - 1 - y as u32
+            } else {
+                y as u32
+            };
+            let a = self.mem + ry * self.pitch + r.left as u32 * bpp as u32;
             m.write(a, &row)?;
         }
         Ok(())

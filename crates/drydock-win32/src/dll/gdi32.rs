@@ -758,7 +758,7 @@ fn draw_text_run(
                     continue;
                 }
                 let cov = bitmap[row * m.width + col] as u32;
-                let addr = sf.mem + py as u32 * sf.pitch + px_ as u32 * bpp as u32;
+                let addr = sf.row_addr(py as u32) + px_ as u32 * bpp as u32;
                 if aa && sf.fmt != Fmt::P8 {
                     if cov == 0 {
                         continue;
