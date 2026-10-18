@@ -44,6 +44,9 @@ fn co_create_instance(s: &mut Session) -> ApiResult {
     if let Some(r) = super::dmusic::create_via_com(s, &clsid, &iid, ppv) {
         return r;
     }
+    if clsid == super::amstream::CLSID_AMMULTIMEDIASTREAM {
+        return super::amstream::create_via_com(s, &iid, ppv);
+    }
     match class_object(&clsid) {
         Some("DirectSound") => super::dsound::create_via_com(s, &iid, ppv),
         Some(other) => {

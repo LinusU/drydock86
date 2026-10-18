@@ -78,4 +78,5 @@ pub static BUILTINS: &[BuiltinDll] = &[
     dll!("VERSION.DLL", version::VERSION_EXPORTS),
     dll!("AVIFIL32.DLL", &[]),
     dll!("MSACM32.DLL", msacm32::MSACM32_EXPORTS),
+    dll!("AMSTREAM.DLL", &[]),
 ];

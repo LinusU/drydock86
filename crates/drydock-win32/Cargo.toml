@@ -10,6 +10,7 @@ drydock-core.workspace = true
 drydock-gfx.workspace = true
 drydock-audio.workspace = true
 drydock-media.workspace = true
+slopmpeg.workspace = true
 serde.workspace = true
 serde_json.workspace = true
 thiserror.workspace = true

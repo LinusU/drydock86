@@ -791,6 +791,7 @@ dependencies = [
  "serde",
  "serde_json",
  "sha2",
+ "slopmpeg",
  "thiserror 2.0.21",
  "ttf-parser",
 ]
@@ -2361,6 +2362,11 @@ name = "slab"
 version = "0.4.12"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "0c790de23124f9ab44544d7ac05d60440adc586479ce501c1d6d7da3cd8c9cf5"
+
+[[package]]
+name = "slopmpeg"
+version = "0.1.0"
+source = "git+https://github.com/LinusU/slopmpeg?rev=393f420db902c5ded0e22cd591a6ee655043cf37#393f420db902c5ded0e22cd591a6ee655043cf37"
 
 [[package]]
 name = "slotmap"

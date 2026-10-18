@@ -27,6 +27,8 @@ drydock-gfx = { path = "crates/drydock-gfx" }
 drydock-audio = { path = "crates/drydock-audio" }
 drydock-fixtures = { path = "crates/drydock-fixtures" }
 drydock-media = { path = "crates/drydock-media" }
+# MPEG-1 video, MP2 audio and program stream demuxing (DirectShow movies).
+slopmpeg = { git = "https://github.com/LinusU/slopmpeg", rev = "393f420db902c5ded0e22cd591a6ee655043cf37" }
 
 [profile.dev]
 opt-level = 1
