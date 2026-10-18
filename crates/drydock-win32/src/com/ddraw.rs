@@ -195,8 +195,14 @@ impl Session {
 
 // ---------------------------------------------------------------- creation
 
-pub static DDRAW_IFACES: &[&IfaceDef] = &[&IDIRECTDRAW7, &IDIRECTDRAW];
-pub static SURFACE_IFACES: &[&IfaceDef] = &[&IDIRECTDRAWSURFACE7];
+pub static DDRAW_IFACES: &[&IfaceDef] = &[&IDIRECTDRAW7, &IDIRECTDRAW4, &IDIRECTDRAW2, &IDIRECTDRAW];
+pub static SURFACE_IFACES: &[&IfaceDef] = &[
+    &IDIRECTDRAWSURFACE7,
+    &IDIRECTDRAWSURFACE4,
+    &IDIRECTDRAWSURFACE3,
+    &IDIRECTDRAWSURFACE2,
+    &IDIRECTDRAWSURFACE,
+];
 
 fn new_ddraw(s: &mut Session) -> u32 {
     s.com_new(ComKind::DirectDraw(DDrawObj {
@@ -308,6 +314,10 @@ fn mode_list(s: &Session) -> Vec<crate::dll::user32::DisplayMode> {
 
 fn dd_set_display_mode(s: &mut Session) -> ApiResult {
     let [_this, w, h, bpp, refresh, _flags] = s.args::<6>()?;
+    set_display_mode(s, w, h, bpp, refresh)
+}
+
+fn set_display_mode(s: &mut Session, w: u32, h: u32, bpp: u32, refresh: u32) -> ApiResult {
     let id = dd_self(s)?;
     let ok = mode_list(s)
         .iter()
@@ -597,11 +607,12 @@ fn dd_enum_surfaces(s: &mut Session) -> ApiResult {
     for id in ids {
         let sf = s.surf(id).unwrap().clone();
         let px = s.display.surfaces[&sf.surface].clone();
-        let p = s.iface(id, &IDIRECTDRAWSURFACE7)?;
+        let def = surface_def(s);
+        let p = s.iface(id, def)?;
         // The callback receives a reference it must release.
         s.com_addref(id);
         let d = build_ddsd(
-            124,
+            ddsd_size(s),
             DDSD_CAPS | DDSD_WIDTH | DDSD_HEIGHT | DDSD_PIXELFORMAT | DDSD_PITCH,
             px.w,
             px.h,
@@ -642,7 +653,16 @@ fn dd_get_available_vid_mem(s: &mut Session) -> ApiResult {
 
 fn dd_get_device_identifier(s: &mut Session) -> ApiResult {
     let [_this, p, _flags] = s.args::<3>()?;
-    let mut b = vec![0u8; 1072];
+    // DDDEVICEIDENTIFIER2 (IDirectDraw7) adds dwWHQLLevel to DDDEVICEIDENTIFIER; both
+    // are padded to a multiple of 8 by the LARGE_INTEGER driver version.
+    let mut b = vec![
+        0u8;
+        if s.caller_version() == DdVersion::V7 {
+            1072
+        } else {
+            1064
+        }
+    ];
     let drv = b"drydock.drv";
     b[..drv.len()].copy_from_slice(drv);
     let desc = b"Drydock Virtual Display Adapter";
@@ -650,7 +670,7 @@ fn dd_get_device_identifier(s: &mut Session) -> ApiResult {
     b[1024..1032].copy_from_slice(&0x0004_0005_0000_0001u64.to_le_bytes());
     // Vendor/device ids are zero: the virtual adapter does not impersonate real hardware.
     let g = guid("d7b71f83-6340-11cf-4c74-0420a1c2cb35");
-    b[1052..1068].copy_from_slice(&g);
+    b[1048..1064].copy_from_slice(&g);
     s.mem.write(p, &b)?;
     Ok(ApiRet::Ret(DD_OK))
 }
@@ -719,7 +739,8 @@ fn dd_get_gdi_surface(s: &mut Session) -> ApiResult {
     let [_this, pp] = s.args::<2>()?;
     match s.com.ddraw.primary {
         Some(p) => {
-            s.out_iface(pp, p, &IDIRECTDRAWSURFACE7)?;
+            let def = surface_def(s);
+            s.out_iface(pp, p, def)?;
             s.com_addref(p);
             Ok(ApiRet::Ret(DD_OK))
         }
@@ -977,7 +998,8 @@ fn dd_create_surface(s: &mut Session) -> ApiResult {
         s.com.ddraw.primary = Some(root);
         s.display.front = s.surface_of_obj(root).unwrap();
     }
-    s.out_iface(pp, root, &IDIRECTDRAWSURFACE7)?;
+    let def = surface_def(s);
+    s.out_iface(pp, root, def)?;
     Ok(ApiRet::Ret(DD_OK))
 }
 
@@ -1093,9 +1115,12 @@ fn sf_get_caps(s: &mut Session) -> ApiResult {
     let [_this, p] = s.args::<2>()?;
     let (_id, sf) = sf_self(s)?;
     s.mem.write_u32(p, sf.caps)?;
-    s.mem.write_u32(p + 4, sf.caps2)?;
-    s.mem.write_u32(p + 8, 0)?;
-    s.mem.write_u32(p + 12, 0)?;
+    // Legacy interfaces take a DDSCAPS (one DWORD), later ones a DDSCAPS2.
+    if s.caller_version() != DdVersion::Legacy {
+        s.mem.write_u32(p + 4, sf.caps2)?;
+        s.mem.write_u32(p + 8, 0)?;
+        s.mem.write_u32(p + 12, 0)?;
+    }
     Ok(ApiRet::Ret(DD_OK))
 }
 
@@ -1233,7 +1258,8 @@ fn sf_get_attached_surface(s: &mut Session) -> ApiResult {
         if let Some(x) = s.surf(c)
             && x.caps & want == want
         {
-            s.out_iface(pp, c, &IDIRECTDRAWSURFACE7)?;
+            let def = surface_def(s);
+            s.out_iface(pp, c, def)?;
             s.com_addref(c);
             return Ok(ApiRet::Ret(DD_OK));
         }
@@ -1292,12 +1318,13 @@ fn sf_enum_attached_surfaces(s: &mut Session) -> ApiResult {
     let mut items = Vec::new();
     for o in list {
         // Each enumerated surface is AddRef'd; the callback releases it.
-        let p = s.iface(o, &IDIRECTDRAWSURFACE7)?;
+        let def = surface_def(s);
+        let p = s.iface(o, def)?;
         s.com_addref(o);
         let px = s.display.surfaces[&s.surf(o).unwrap().surface].clone();
         let so = s.surf(o).unwrap().clone();
         let d = build_ddsd(
-            124,
+            ddsd_size(s),
             DDSD_CAPS | DDSD_WIDTH | DDSD_HEIGHT | DDSD_PIXELFORMAT | DDSD_PITCH,
             px.w,
             px.h,
@@ -1549,7 +1576,8 @@ fn sf_release_dc(s: &mut Session) -> ApiResult {
 fn sf_get_dd_interface(s: &mut Session) -> ApiResult {
     let [_this, pp] = s.args::<2>()?;
     let (_id, sf) = sf_self(s)?;
-    s.out_iface(pp, sf.ddraw, &IDIRECTDRAW7)?;
+    let def = ddraw_def(s);
+    s.out_iface(pp, sf.ddraw, def)?;
     s.com_addref(sf.ddraw);
     Ok(ApiRet::Ret(DD_OK))
 }
@@ -2065,139 +2093,247 @@ pub fn service(s: &mut Session) {
 
 // ---------------------------------------------------------------- interface tables
 
+/// IDirectDraw7 methods in vtable order. Earlier versions are prefixes of this list:
+/// IDirectDraw2 has the first 24 methods, IDirectDraw4 the first 28. IDirectDraw (1)
+/// differs from IDirectDraw2 only in SetDisplayMode's arguments and the missing
+/// GetAvailableVidMem.
+static DD_METHODS: [ExportDef; 30] = [
+    iunknown!()[0],
+    iunknown!()[1],
+    iunknown!()[2],
+    export!("Compact", 1, dd_ok),
+    export!("CreateClipper", 4, dd_create_clipper),
+    export!("CreatePalette", 5, dd_create_palette),
+    export!("CreateSurface", 4, dd_create_surface),
+    unimpl_method!("DuplicateSurface", 3),
+    export!("EnumDisplayModes", 5, dd_enum_display_modes),
+    export!("EnumSurfaces", 5, dd_enum_surfaces),
+    export!("FlipToGDISurface", 1, dd_flip_to_gdi_surface),
+    export!("GetCaps", 3, dd_get_caps),
+    export!("GetDisplayMode", 2, dd_get_display_mode),
+    export!("GetFourCCCodes", 3, dd_get_fourcc_codes),
+    export!("GetGDISurface", 2, dd_get_gdi_surface),
+    export!("GetMonitorFrequency", 2, dd_get_monitor_frequency),
+    export!("GetScanLine", 2, dd_get_scan_line),
+    export!("GetVerticalBlankStatus", 2, dd_get_vertical_blank_status),
+    unimpl_method!("Initialize", 2),
+    export!("RestoreDisplayMode", 1, dd_restore_display_mode),
+    export!("SetCooperativeLevel", 3, dd_set_cooperative_level),
+    export!("SetDisplayMode", 6, dd_set_display_mode),
+    export!("WaitForVerticalBlank", 3, dd_wait_for_vertical_blank),
+    export!("GetAvailableVidMem", 4, dd_get_available_vid_mem),
+    unimpl_method!("GetSurfaceFromDC", 3),
+    export!("RestoreAllSurfaces", 1, dd_restore_all_surfaces),
+    export!("TestCooperativeLevel", 1, dd_test_cooperative_level),
+    export!("GetDeviceIdentifier", 3, dd_get_device_identifier),
+    unimpl_method!("StartModeTest", 4),
+    unimpl_method!("EvaluateMode", 3),
+];
+
+static DD1_METHODS: [ExportDef; 23] = {
+    let mut m = [DD_METHODS[0]; 23];
+    let mut i = 0;
+    while i < 23 {
+        m[i] = DD_METHODS[i];
+        i += 1;
+    }
+    m[21] = export!("SetDisplayMode", 4, dd1_set_display_mode);
+    m
+};
+
 pub static IDIRECTDRAW7: IfaceDef = IfaceDef {
     name: "IDirectDraw7",
     iid: guid("15e65ec0-3b9c-11d2-b92f-00609797ea5b"),
     module: "DDRAW.DLL",
-    methods: &[
-        iunknown!()[0],
-        iunknown!()[1],
-        iunknown!()[2],
-        export!("Compact", 1, dd_ok),
-        export!("CreateClipper", 4, dd_create_clipper),
-        export!("CreatePalette", 5, dd_create_palette),
-        export!("CreateSurface", 4, dd_create_surface),
-        unimpl_method!("DuplicateSurface", 3),
-        export!("EnumDisplayModes", 5, dd_enum_display_modes),
-        export!("EnumSurfaces", 5, dd_enum_surfaces),
-        export!("FlipToGDISurface", 1, dd_flip_to_gdi_surface),
-        export!("GetCaps", 3, dd_get_caps),
-        export!("GetDisplayMode", 2, dd_get_display_mode),
-        export!("GetFourCCCodes", 3, dd_get_fourcc_codes),
-        export!("GetGDISurface", 2, dd_get_gdi_surface),
-        export!("GetMonitorFrequency", 2, dd_get_monitor_frequency),
-        export!("GetScanLine", 2, dd_get_scan_line),
-        export!("GetVerticalBlankStatus", 2, dd_get_vertical_blank_status),
-        unimpl_method!("Initialize", 2),
-        export!("RestoreDisplayMode", 1, dd_restore_display_mode),
-        export!("SetCooperativeLevel", 3, dd_set_cooperative_level),
-        export!("SetDisplayMode", 6, dd_set_display_mode),
-        export!("WaitForVerticalBlank", 3, dd_wait_for_vertical_blank),
-        export!("GetAvailableVidMem", 4, dd_get_available_vid_mem),
-        unimpl_method!("GetSurfaceFromDC", 3),
-        export!("RestoreAllSurfaces", 1, dd_restore_all_surfaces),
-        export!("TestCooperativeLevel", 1, dd_test_cooperative_level),
-        export!("GetDeviceIdentifier", 3, dd_get_device_identifier),
-        unimpl_method!("StartModeTest", 4),
-        unimpl_method!("EvaluateMode", 3),
-    ],
+    methods: &DD_METHODS,
+};
+
+pub static IDIRECTDRAW4: IfaceDef = IfaceDef {
+    name: "IDirectDraw4",
+    iid: guid("9c59509a-39bd-11d1-8c4a-00c04fd930c5"),
+    module: "DDRAW.DLL",
+    methods: DD_METHODS.split_at(28).0,
+};
+
+pub static IDIRECTDRAW2: IfaceDef = IfaceDef {
+    name: "IDirectDraw2",
+    iid: guid("b3a6f3e0-2b43-11cf-a2de-00aa00b93356"),
+    module: "DDRAW.DLL",
+    methods: DD_METHODS.split_at(24).0,
 };
 
 fn dd1_set_display_mode(s: &mut Session) -> ApiResult {
-    // IDirectDraw::SetDisplayMode(w, h, bpp) → same as 7 with default refresh.
-    let [this, w, h, bpp] = s.args::<4>()?;
-    let esp = s.cpu.esp();
-    let _ = (this, w, h, bpp, esp);
-    unimpl("IDirectDraw::SetDisplayMode (v1 signature)")
+    let [_this, w, h, bpp] = s.args::<4>()?;
+    set_display_mode(s, w, h, bpp, 0)
 }
 
 pub static IDIRECTDRAW: IfaceDef = IfaceDef {
     name: "IDirectDraw",
     iid: guid("6c14db80-a733-11ce-a521-0020af0be560"),
     module: "DDRAW.DLL",
-    methods: &[
-        iunknown!()[0],
-        iunknown!()[1],
-        iunknown!()[2],
-        export!("Compact", 1, dd_ok),
-        export!("CreateClipper", 4, dd_create_clipper),
-        export!("CreatePalette", 5, dd_create_palette),
-        unimpl_method!("CreateSurface", 4),
-        unimpl_method!("DuplicateSurface", 3),
-        unimpl_method!("EnumDisplayModes", 5),
-        unimpl_method!("EnumSurfaces", 5),
-        export!("FlipToGDISurface", 1, dd_flip_to_gdi_surface),
-        export!("GetCaps", 3, dd_get_caps),
-        unimpl_method!("GetDisplayMode", 2),
-        export!("GetFourCCCodes", 3, dd_get_fourcc_codes),
-        unimpl_method!("GetGDISurface", 2),
-        export!("GetMonitorFrequency", 2, dd_get_monitor_frequency),
-        export!("GetScanLine", 2, dd_get_scan_line),
-        export!("GetVerticalBlankStatus", 2, dd_get_vertical_blank_status),
-        unimpl_method!("Initialize", 2),
-        export!("RestoreDisplayMode", 1, dd_restore_display_mode),
-        export!("SetCooperativeLevel", 3, dd_set_cooperative_level),
-        export!("SetDisplayMode", 4, dd1_set_display_mode),
-        export!("WaitForVerticalBlank", 3, dd_wait_for_vertical_blank),
-    ],
+    methods: &DD1_METHODS,
 };
+
+/// IDirectDrawSurface7 methods in vtable order. IDirectDrawSurface has the first 36,
+/// IDirectDrawSurface2 39, IDirectDrawSurface3 40 and IDirectDrawSurface4 45.
+static SURFACE_METHODS: [ExportDef; 49] = [
+    iunknown!()[0],
+    iunknown!()[1],
+    iunknown!()[2],
+    export!("AddAttachedSurface", 2, sf_add_attached_surface),
+    unimpl_method!("AddOverlayDirtyRect", 2),
+    export!("Blt", 6, sf_blt),
+    unimpl_method!("BltBatch", 4),
+    export!("BltFast", 6, sf_blt_fast),
+    export!("DeleteAttachedSurface", 3, sf_delete_attached_surface),
+    export!("EnumAttachedSurfaces", 3, sf_enum_attached_surfaces),
+    unimpl_method!("EnumOverlayZOrders", 4),
+    export!("Flip", 3, sf_flip),
+    export!("GetAttachedSurface", 3, sf_get_attached_surface),
+    export!("GetBltStatus", 2, sf_get_blt_status),
+    export!("GetCaps", 2, sf_get_caps),
+    export!("GetClipper", 2, sf_get_clipper),
+    export!("GetColorKey", 3, sf_get_color_key),
+    export!("GetDC", 2, sf_get_dc),
+    export!("GetFlipStatus", 2, sf_get_flip_status),
+    unimpl_method!("GetOverlayPosition", 3),
+    export!("GetPalette", 2, sf_get_palette),
+    export!("GetPixelFormat", 2, sf_get_pixel_format),
+    export!("GetSurfaceDesc", 2, sf_get_surface_desc),
+    unimpl_method!("Initialize", 3),
+    export!("IsLost", 1, sf_is_lost),
+    export!("Lock", 5, sf_lock),
+    export!("ReleaseDC", 2, sf_release_dc),
+    export!("Restore", 1, sf_restore),
+    export!("SetClipper", 2, sf_set_clipper),
+    export!("SetColorKey", 3, sf_set_color_key),
+    unimpl_method!("SetOverlayPosition", 3),
+    export!("SetPalette", 2, sf_set_palette),
+    export!("Unlock", 2, sf_unlock),
+    unimpl_method!("UpdateOverlay", 6),
+    unimpl_method!("UpdateOverlayDisplay", 2),
+    unimpl_method!("UpdateOverlayZOrder", 3),
+    export!("GetDDInterface", 2, sf_get_dd_interface),
+    export!("PageLock", 2, sf_page_lock),
+    export!("PageUnlock", 2, sf_page_lock),
+    unimpl_method!("SetSurfaceDesc", 3),
+    export!("SetPrivateData", 5, sf_set_private_data),
+    export!("GetPrivateData", 4, sf_get_private_data),
+    export!("FreePrivateData", 2, sf_free_private_data),
+    export!("GetUniquenessValue", 2, sf_get_uniqueness_value),
+    export!("ChangeUniquenessValue", 1, sf_change_uniqueness_value),
+    export!("SetPriority", 2, sf_set_priority),
+    export!("GetPriority", 2, sf_get_priority),
+    export!("SetLOD", 2, sf_set_lod),
+    export!("GetLOD", 2, sf_get_lod),
+];
 
 pub static IDIRECTDRAWSURFACE7: IfaceDef = IfaceDef {
     name: "IDirectDrawSurface7",
     iid: guid("06675a80-3b9b-11d2-b92f-00609797ea5b"),
     module: "DDRAW.DLL",
-    methods: &[
-        iunknown!()[0],
-        iunknown!()[1],
-        iunknown!()[2],
-        export!("AddAttachedSurface", 2, sf_add_attached_surface),
-        unimpl_method!("AddOverlayDirtyRect", 2),
-        export!("Blt", 6, sf_blt),
-        unimpl_method!("BltBatch", 4),
-        export!("BltFast", 6, sf_blt_fast),
-        export!("DeleteAttachedSurface", 3, sf_delete_attached_surface),
-        export!("EnumAttachedSurfaces", 3, sf_enum_attached_surfaces),
-        unimpl_method!("EnumOverlayZOrders", 4),
-        export!("Flip", 3, sf_flip),
-        export!("GetAttachedSurface", 3, sf_get_attached_surface),
-        export!("GetBltStatus", 2, sf_get_blt_status),
-        export!("GetCaps", 2, sf_get_caps),
-        export!("GetClipper", 2, sf_get_clipper),
-        export!("GetColorKey", 3, sf_get_color_key),
-        export!("GetDC", 2, sf_get_dc),
-        export!("GetFlipStatus", 2, sf_get_flip_status),
-        unimpl_method!("GetOverlayPosition", 3),
-        export!("GetPalette", 2, sf_get_palette),
-        export!("GetPixelFormat", 2, sf_get_pixel_format),
-        export!("GetSurfaceDesc", 2, sf_get_surface_desc),
-        unimpl_method!("Initialize", 3),
-        export!("IsLost", 1, sf_is_lost),
-        export!("Lock", 5, sf_lock),
-        export!("ReleaseDC", 2, sf_release_dc),
-        export!("Restore", 1, sf_restore),
-        export!("SetClipper", 2, sf_set_clipper),
-        export!("SetColorKey", 3, sf_set_color_key),
-        unimpl_method!("SetOverlayPosition", 3),
-        export!("SetPalette", 2, sf_set_palette),
-        export!("Unlock", 2, sf_unlock),
-        unimpl_method!("UpdateOverlay", 6),
-        unimpl_method!("UpdateOverlayDisplay", 2),
-        unimpl_method!("UpdateOverlayZOrder", 3),
-        export!("GetDDInterface", 2, sf_get_dd_interface),
-        export!("PageLock", 2, sf_page_lock),
-        export!("PageUnlock", 2, sf_page_lock),
-        unimpl_method!("SetSurfaceDesc", 3),
-        export!("SetPrivateData", 5, sf_set_private_data),
-        export!("GetPrivateData", 4, sf_get_private_data),
-        export!("FreePrivateData", 2, sf_free_private_data),
-        export!("GetUniquenessValue", 2, sf_get_uniqueness_value),
-        export!("ChangeUniquenessValue", 1, sf_change_uniqueness_value),
-        export!("SetPriority", 2, sf_set_priority),
-        export!("GetPriority", 2, sf_get_priority),
-        export!("SetLOD", 2, sf_set_lod),
-        export!("GetLOD", 2, sf_get_lod),
-    ],
+    methods: &SURFACE_METHODS,
 };
+
+pub static IDIRECTDRAWSURFACE4: IfaceDef = IfaceDef {
+    name: "IDirectDrawSurface4",
+    iid: guid("0b2b8630-ad35-11d0-8ea6-00609797ea5b"),
+    module: "DDRAW.DLL",
+    methods: SURFACE_METHODS.split_at(45).0,
+};
+
+pub static IDIRECTDRAWSURFACE3: IfaceDef = IfaceDef {
+    name: "IDirectDrawSurface3",
+    iid: guid("da044e00-69b2-11d0-a1d5-00aa00b8dfbb"),
+    module: "DDRAW.DLL",
+    methods: SURFACE_METHODS.split_at(40).0,
+};
+
+pub static IDIRECTDRAWSURFACE2: IfaceDef = IfaceDef {
+    name: "IDirectDrawSurface2",
+    iid: guid("57805885-6eec-11cf-9441-a82303c10e27"),
+    module: "DDRAW.DLL",
+    methods: SURFACE_METHODS.split_at(39).0,
+};
+
+pub static IDIRECTDRAWSURFACE: IfaceDef = IfaceDef {
+    name: "IDirectDrawSurface",
+    iid: guid("6c14db81-a733-11ce-a521-0020af0be560"),
+    module: "DDRAW.DLL",
+    methods: SURFACE_METHODS.split_at(36).0,
+};
+
+/// Interface generation of the pointer a DirectDraw method was called through.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+pub enum DdVersion {
+    /// IDirectDraw, IDirectDraw2, IDirectDrawSurface 1–3: DDSURFACEDESC, DDSCAPS.
+    Legacy,
+    /// IDirectDraw4, IDirectDrawSurface4, Direct3D 6.
+    V4,
+    V7,
+}
+
+pub fn iface_version(name: &str) -> DdVersion {
+    match name {
+        "IDirectDraw"
+        | "IDirectDraw2"
+        | "IDirectDrawSurface"
+        | "IDirectDrawSurface2"
+        | "IDirectDrawSurface3"
+        | "IDirect3D"
+        | "IDirect3D2"
+        | "IDirect3DDevice"
+        | "IDirect3DDevice2"
+        | "IDirect3DTexture"
+        | "IDirect3DTexture2" => DdVersion::Legacy,
+        "IDirectDraw4" | "IDirectDrawSurface4" | "IDirect3D3" | "IDirect3DDevice3" | "IDirect3DVertexBuffer" => {
+            DdVersion::V4
+        }
+        _ => DdVersion::V7,
+    }
+}
+
+impl Session {
+    /// Name of the interface `this` (argument 0) points at.
+    pub fn caller_iface(&self) -> String {
+        let this = self.arg(0).unwrap_or(0);
+        self.com.ptrs.get(&this).map(|(_, n)| n.clone()).unwrap_or_default()
+    }
+    pub fn caller_version(&self) -> DdVersion {
+        iface_version(&self.caller_iface())
+    }
+}
+
+/// The surface interface a method returns: the caller's own surface version, or the
+/// surface generation that matches a DirectDraw/Direct3D interface.
+pub fn surface_def(s: &Session) -> &'static IfaceDef {
+    match s.caller_iface().as_str() {
+        "IDirectDrawSurface2" => &IDIRECTDRAWSURFACE2,
+        "IDirectDrawSurface3" => &IDIRECTDRAWSURFACE3,
+        n => match iface_version(n) {
+            DdVersion::Legacy => &IDIRECTDRAWSURFACE,
+            DdVersion::V4 => &IDIRECTDRAWSURFACE4,
+            DdVersion::V7 => &IDIRECTDRAWSURFACE7,
+        },
+    }
+}
+
+fn ddraw_def(s: &Session) -> &'static IfaceDef {
+    match s.caller_version() {
+        DdVersion::Legacy => &IDIRECTDRAW,
+        DdVersion::V4 => &IDIRECTDRAW4,
+        DdVersion::V7 => &IDIRECTDRAW7,
+    }
+}
+
+/// DDSURFACEDESC (108 bytes) for legacy interfaces, DDSURFACEDESC2 (124) otherwise.
+fn ddsd_size(s: &Session) -> u32 {
+    if s.caller_version() == DdVersion::Legacy {
+        108
+    } else {
+        124
+    }
+}
 
 pub static IDIRECTDRAWPALETTE: IfaceDef = IfaceDef {
     name: "IDirectDrawPalette",
