@@ -385,7 +385,7 @@ pub fn draw_label(
     let Some((id, (ox, oy), clip)) = dc_target(s, hdc) else {
         return Ok(());
     };
-    let lines = layout_lines(&fi, text, rc.w(), fmt);
+    let lines: Vec<String> = layout_lines(&fi, text, rc.w(), fmt).into_iter().map(|l| l.0).collect();
     let lh = fi.ascent + fi.descent;
     let clip = clip.intersect(&Rect::new(rc.left + ox, rc.top + oy, rc.right + ox, rc.bottom + oy));
     let mut y = rc.top;
@@ -879,55 +879,85 @@ fn get_text_metrics_a(s: &mut Session) -> ApiResult {
     Ok(ApiRet::Ret(1))
 }
 
-/// Split text into lines for DrawText (word breaking, '&' prefixes, tabs).
-fn layout_lines(fi: &FontInst, text: &str, width: i32, fmt: u32) -> Vec<String> {
-    let mut raw = String::new();
+/// Lines of `text` as DrawText lays them out, each with the number of characters of
+/// `text` it consumes (including its line break, or the spaces at a word wrap).
+fn layout_lines(fi: &FontInst, text: &str, width: i32, fmt: u32) -> Vec<(String, usize)> {
+    // Prefix characters (&) are removed unless DT_NOPREFIX; DT_EXPANDTABS expands tabs.
+    let disp = |src: &str| -> String {
+        let mut out = String::new();
+        let mut chars = src.chars().peekable();
+        while let Some(c) = chars.next() {
+            if c == '&' && fmt & 0x800 == 0 {
+                if chars.peek() == Some(&'&') {
+                    out.push('&');
+                    chars.next();
+                }
+                continue;
+            }
+            if c == '\t' && fmt & 0x40 != 0 {
+                out.push_str("        ");
+                continue;
+            }
+            out.push(c);
+        }
+        out
+    };
+    let total = text.chars().count();
+    if fmt & 0x20 != 0 {
+        // DT_SINGLELINE: line breaks are ignored.
+        return vec![(disp(&text.replace(['\r', '\n'], "")), total)];
+    }
+    // Paragraphs with their source length including the terminating line break.
+    let mut paragraphs: Vec<(String, usize)> = Vec::new();
+    let mut cur = String::new();
     let mut chars = text.chars().peekable();
     while let Some(c) = chars.next() {
-        if c == '&' && fmt & 0x800 == 0 {
-            if chars.peek() == Some(&'&') {
-                raw.push('&');
-                chars.next();
+        match c {
+            '\r' | '\n' => {
+                let mut n = cur.chars().count() + 1;
+                if c == '\r' && chars.peek() == Some(&'\n') {
+                    chars.next();
+                    n += 1;
+                }
+                paragraphs.push((std::mem::take(&mut cur), n));
             }
-            continue;
+            c => cur.push(c),
         }
-        if c == '\t' && fmt & 0x40 != 0 {
-            raw.push_str("        ");
-            continue;
-        }
-        raw.push(c);
     }
-    let single = fmt & 0x20 != 0;
-    let paragraphs: Vec<String> = if single {
-        vec![raw.replace(['\r', '\n'], "")]
-    } else {
-        raw.replace("\r\n", "\n")
-            .split(['\n', '\r'])
-            .map(|s| s.to_string())
-            .collect()
-    };
-    if single || fmt & 0x10 == 0 {
-        return paragraphs;
+    let n = cur.chars().count();
+    paragraphs.push((cur, n));
+    if fmt & 0x10 == 0 {
+        return paragraphs.into_iter().map(|(p, n)| (disp(&p), n)).collect();
     }
+    // DT_WORDBREAK: wrap at spaces.
     let mut out = Vec::new();
-    for p in paragraphs {
+    for (p, n) in paragraphs {
         let mut line = String::new();
+        let mut used = 0;
         for word in p.split_inclusive(' ') {
             let cand = format!("{line}{word}");
-            if !line.is_empty() && text_width(fi, cand.trim_end()) > width {
-                out.push(line.trim_end().to_string());
+            if !line.is_empty() && text_width(fi, disp(&cand).trim_end()) > width {
+                let k = line.chars().count();
+                out.push((disp(&line).trim_end().to_string(), k));
+                used += k;
                 line = word.to_string();
             } else {
                 line = cand;
             }
         }
-        out.push(line.trim_end().to_string());
+        out.push((disp(&line).trim_end().to_string(), n - used));
     }
     out
 }
 
 pub fn draw_text_a(s: &mut Session) -> ApiResult {
     let [hdc, p, n, prc, fmt] = s.args::<5>()?;
+    draw_text(s, hdc, p, n, prc, fmt, 0)
+}
+
+/// DrawText/DrawTextEx. `params` is a DRAWTEXTPARAMS (margins in, characters
+/// processed out) or 0.
+pub fn draw_text(s: &mut Session, hdc: u32, p: u32, n: u32, prc: u32, fmt: u32, params: u32) -> ApiResult {
     let bytes = if n as i32 == -1 {
         s.mem.read_cstr(p, 0x10000)?
     } else {
@@ -937,17 +967,36 @@ pub fn draw_text_a(s: &mut Session) -> ApiResult {
     let Some(dc) = s.gdi.dc(hdc).cloned() else {
         return Ok(ApiRet::Ret(0));
     };
+    let (lm, rm) = if params != 0 {
+        (s.mem.read_u32(params + 8)? as i32, s.mem.read_u32(params + 12)? as i32)
+    } else {
+        (0, 0)
+    };
     let lf = dc_font(s, hdc);
     let fi = font_inst(&lf);
-    let rc = s.read_rect(prc)?;
+    let full = s.read_rect(prc)?;
+    let rc = Rect::new(full.left + lm, full.top, full.right - rm, full.bottom);
     let lines = layout_lines(&fi, &text, rc.w(), fmt);
     let lh = fi.ascent + fi.descent;
     let total_h = lh * lines.len() as i32;
+    if params != 0 {
+        // Characters of the lines that start inside the rectangle (all of them when
+        // measuring or not clipping).
+        let fits = if fmt & (0x400 | 0x100 | 0x20) != 0 {
+            lines.len()
+        } else {
+            (((full.h() + lh - 1) / lh.max(1)).max(1) as usize).min(lines.len())
+        };
+        let drawn: usize = lines[..fits].iter().map(|l| l.1).sum();
+        s.mem.write_u32(params + 16, drawn as u32)?;
+    }
     if fmt & 0x400 != 0 {
         // DT_CALCRECT
-        let w = lines.iter().map(|l| text_width(&fi, l)).max().unwrap_or(0);
-        let mut r = rc;
+        let w = lines.iter().map(|l| text_width(&fi, &l.0)).max().unwrap_or(0);
+        let mut r = full;
         r.right = r.left
+            + lm
+            + rm
             + if fmt & 0x10 != 0 {
                 w.max(0).min(rc.w().max(w))
             } else {
@@ -963,7 +1012,12 @@ pub fn draw_text_a(s: &mut Session) -> ApiResult {
     let clip = if fmt & 0x100 != 0 {
         clip
     } else {
-        clip.intersect(&Rect::new(rc.left + ox, rc.top + oy, rc.right + ox, rc.bottom + oy))
+        clip.intersect(&Rect::new(
+            full.left + ox,
+            full.top + oy,
+            full.right + ox,
+            full.bottom + oy,
+        ))
     };
     let mut y = rc.top;
     if fmt & 0x20 != 0 {
@@ -974,7 +1028,7 @@ pub fn draw_text_a(s: &mut Session) -> ApiResult {
         }
     }
     let bk = (dc.bk_mode == 2).then_some(dc.bk_color);
-    for l in &lines {
+    for (l, _) in &lines {
         let w = text_width(&fi, l);
         let x = match fmt & 3 {
             1 => rc.left + (rc.w() - w) / 2,
@@ -1005,3 +1059,25 @@ pub static GDI32_EXPORTS: &[ExportDef] = &[
     export!("SetTextColor", 2, set_text_color),
     export!("TextOutA", 5, text_out_a),
 ];
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn layout_counts_consumed_characters() {
+        let fi = font_inst(&system_font("MS Sans Serif", -11, 400));
+        // Line breaks count towards the line they end.
+        let l = layout_lines(&fi, "ab\r\ncd\nef", 1000, 0);
+        let counts: Vec<_> = l.iter().map(|x| (x.0.as_str(), x.1)).collect();
+        assert_eq!(counts, vec![("ab", 4), ("cd", 3), ("ef", 2)]);
+        // Word wrap: the space at the break belongs to the first line.
+        let w = text_width(&fi, "hello");
+        let l = layout_lines(&fi, "hello world", w + 2, 0x10);
+        let counts: Vec<_> = l.iter().map(|x| (x.0.as_str(), x.1)).collect();
+        assert_eq!(counts, vec![("hello", 6), ("world", 5)]);
+        // Prefix characters are hidden but counted.
+        let l = layout_lines(&fi, "&File", 1000, 0x20);
+        assert_eq!((l[0].0.as_str(), l[0].1), ("File", 5));
+    }
+}
