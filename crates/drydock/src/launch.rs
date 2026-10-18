@@ -27,6 +27,10 @@ pub struct RunArgs {
     /// Guest path where --root is mounted.
     #[arg(long, default_value = "C:\\GAME")]
     pub mount: String,
+    /// Extra read-only mount, as GUEST=HOST (a guest path and a host file or directory),
+    /// for example `--map 'C:\WINNT\Fonts=/path/to/Fonts'`. Repeatable.
+    #[arg(long = "map")]
+    pub map: Vec<String>,
     /// Extra command-line arguments passed to the program.
     #[arg(long, default_value = "")]
     pub args: String,
@@ -143,6 +147,16 @@ pub fn build_session(a: &RunArgs) -> Result<Session> {
         }
     };
     vfs.mount(mount, root);
+    for m in &a.map {
+        let (guest, host) = m
+            .split_once('=')
+            .with_context(|| format!("--map {m:?} is not GUEST=HOST"))?;
+        let guest = vfs::normalize(guest, &base).with_context(|| format!("bad guest path in --map {m:?}"))?;
+        let host = PathBuf::from(host)
+            .canonicalize()
+            .with_context(|| format!("--map host path {host}"))?;
+        vfs.mount(guest, host);
+    }
     if let Some(o) = &a.overlay {
         std::fs::create_dir_all(o)?;
         vfs.load_persisted(o)?;

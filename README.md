@@ -65,6 +65,7 @@ Other useful options (see `drydock run --help`):
 | `--audio device\|wav:<file>\|discard\|none` | Audio output; parts can be combined with `+`. Defaults to `device` in play mode and `none` headless. |
 | `--overlay <dir>` | Persist guest file and registry changes in this directory. |
 | `--reg <file.reg>` | Import registry entries before start. |
+| `--map 'GUEST=HOST'` | Mount a host file or directory read-only at a guest path, such as fonts at `C:\WINNT\Fonts`. |
 | `--restore <file.ddck>` | Start from a disk checkpoint instead of process start. |
 | `--replay-input <file>` | Replay an input timeline (or a run's `provenance.json`). |
 | `--trace <API>` | Record calls of matching APIs (substring match). |
