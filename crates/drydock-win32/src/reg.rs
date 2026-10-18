@@ -280,7 +280,13 @@ impl Registry {
                     let val = match v.ty {
                         REG_SZ => {
                             let s = v.data.strip_suffix(&[0]).unwrap_or(&v.data);
-                            format!("\"{}\"", escape(&String::from_utf8_lossy(s)))
+                            // Strings with embedded NULs or non-ASCII bytes are written as
+                            // raw bytes so that they read back exactly.
+                            if s.iter().all(|&c| (0x20..0x7f).contains(&c) || c == b'\t') {
+                                format!("\"{}\"", escape(&String::from_utf8_lossy(s)))
+                            } else {
+                                format!("hex(1):{}", hexlist(&v.data))
+                            }
                         }
                         REG_DWORD if v.data.len() == 4 => {
                             format!("dword:{:08x}", u32::from_le_bytes(v.data[..4].try_into().unwrap()))
