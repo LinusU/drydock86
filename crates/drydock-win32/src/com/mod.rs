@@ -6,6 +6,7 @@
 //! stable ids and explicit reference counts.
 
 pub mod d3d;
+pub mod d3d6;
 pub mod ddraw;
 pub mod dinput;
 pub mod dmusic;
@@ -109,6 +110,9 @@ pub enum ComKind {
     Ds3dBuffer(u32),
     ClassFactory(Guid),
     DMusic(dmusic::DmKind),
+    Viewport3(Box<d3d6::Viewport3>),
+    Material3(d3d6::Material3),
+    Light3(Box<d3d6::Light3>),
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -285,6 +289,13 @@ pub static ALL_IFACES: &[&IfaceDef] = &[
     &d3d::IDIRECT3D7,
     &d3d::IDIRECT3DDEVICE7,
     &d3d::IDIRECT3DVERTEXBUFFER7,
+    &d3d6::IDIRECT3D3,
+    &d3d6::IDIRECT3DDEVICE3,
+    &d3d6::IDIRECT3DVIEWPORT3,
+    &d3d6::IDIRECT3DMATERIAL3,
+    &d3d6::IDIRECT3DLIGHT,
+    &d3d6::IDIRECT3DTEXTURE2,
+    &d3d6::IDIRECT3DVERTEXBUFFER,
     &ddraw::IDIRECTDRAW7,
     &ddraw::IDIRECTDRAW4,
     &ddraw::IDIRECTDRAW2,
@@ -313,8 +324,17 @@ fn supported(kind: &ComKind) -> Vec<&'static IfaceDef> {
         ComKind::Palette(_) => vec![&ddraw::IDIRECTDRAWPALETTE],
         ComKind::Clipper(_) => vec![&ddraw::IDIRECTDRAWCLIPPER],
         ComKind::Direct3D => vec![&d3d::IDIRECT3D7],
-        ComKind::Device(_) => vec![&d3d::IDIRECT3DDEVICE7],
-        ComKind::VertexBuffer(_) => vec![&d3d::IDIRECT3DVERTEXBUFFER7],
+        ComKind::Device(d) => {
+            if d.v3.is_some() {
+                vec![&d3d6::IDIRECT3DDEVICE3]
+            } else {
+                vec![&d3d::IDIRECT3DDEVICE7]
+            }
+        }
+        ComKind::VertexBuffer(_) => vec![&d3d::IDIRECT3DVERTEXBUFFER7, &d3d6::IDIRECT3DVERTEXBUFFER],
+        ComKind::Viewport3(_) => vec![&d3d6::IDIRECT3DVIEWPORT3],
+        ComKind::Material3(_) => vec![&d3d6::IDIRECT3DMATERIAL3],
+        ComKind::Light3(_) => vec![&d3d6::IDIRECT3DLIGHT],
         ComKind::DInput(_) => dinput::DINPUT_IFACES.to_vec(),
         ComKind::DInputDevice(_) => dinput::DEVICE_IFACES.to_vec(),
         ComKind::DSound(_) => vec![&dsound::IDIRECTSOUND],

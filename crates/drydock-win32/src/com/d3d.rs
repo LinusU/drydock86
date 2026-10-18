@@ -127,6 +127,13 @@ pub struct Device {
     pub blocks: BTreeMap<u32, StateBlock>,
     pub recording: Option<StateBlock>,
     pub next_block: u32,
+    /// Direct3D 6 state of a device created through IDirect3D3.
+    #[serde(default)]
+    pub v3: Option<Box<super::d3d6::Dev3>>,
+    /// Maps a Direct3D 6 viewport's clip volume onto the standard one (applied after
+    /// the projection matrix).
+    #[serde(default)]
+    pub proj_adjust: Option<[f32; 16]>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -139,7 +146,7 @@ pub struct VertexBuffer {
     pub locks: u32,
 }
 
-const IDENTITY: [f32; 16] = [1., 0., 0., 0., 0., 1., 0., 0., 0., 0., 1., 0., 0., 0., 0., 1.];
+pub(super) const IDENTITY: [f32; 16] = [1., 0., 0., 0., 0., 1., 0., 0., 0., 0., 1., 0., 0., 0., 0., 1.];
 
 fn default_rs(zenable: bool) -> Vec<u32> {
     let mut rs = vec![0u32; 256];
@@ -526,16 +533,18 @@ pub fn device_destroyed(_s: &mut Session, _id: u32, _d: Device) {}
 // ---------------------------------------------------------------- IDirect3D7
 
 pub fn ddraw_qi(s: &mut Session, id: u32, iid: &Guid, ppv: u32) -> Result<Option<u32>, ApiError> {
-    if *iid == IDIRECT3D7.iid {
-        // IDirect3D7 is an interface of the DirectDraw object.
-        s.out_iface(ppv, id, &IDIRECT3D7)?;
-        s.com_addref(id);
-        return Ok(Some(S_OK));
+    // IDirect3D7 and IDirect3D3 are interfaces of the DirectDraw object.
+    for def in [&IDIRECT3D7, &super::d3d6::IDIRECT3D3] {
+        if *iid == def.iid {
+            s.out_iface(ppv, id, def)?;
+            s.com_addref(id);
+            return Ok(Some(S_OK));
+        }
     }
     Ok(None)
 }
 
-fn device_desc(tnl: bool, hal: bool) -> Vec<u8> {
+pub(super) fn device_desc(tnl: bool, hal: bool) -> Vec<u8> {
     let mut b = vec![0u8; 236];
     let p = |b: &mut Vec<u8>, o: usize, v: u32| b[o..o + 4].copy_from_slice(&v.to_le_bytes());
     let mut dev = 0x1 | 0x10 | 0x20 | 0x40 | 0x80 | 0x200 | 0x400 | 0x800 | 0x2000 | 0x8000;
@@ -595,7 +604,7 @@ fn device_desc(tnl: bool, hal: bool) -> Vec<u8> {
     b
 }
 
-fn cstr(t: &str) -> CallArg {
+pub(super) fn cstr(t: &str) -> CallArg {
     let mut b = crate::strings::encode_ansi(t);
     b.push(0);
     CallArg::Buf(b)
@@ -626,7 +635,7 @@ fn d3d_enum_devices(s: &mut Session) -> ApiResult {
     enum_callbacks(cb, items, 0, D3D_OK)
 }
 
-fn d3d_enum_zbuffer_formats(s: &mut Session) -> ApiResult {
+pub(super) fn d3d_enum_zbuffer_formats(s: &mut Session) -> ApiResult {
     let [_this, _riid, cb, ctx] = s.args::<4>()?;
     let items = [Fmt::D16, Fmt::D32]
         .iter()
@@ -645,11 +654,23 @@ fn d3d_enum_zbuffer_formats(s: &mut Session) -> ApiResult {
 
 fn d3d_create_device(s: &mut Session) -> ApiResult {
     let [_this, clsid_p, target_p, pp] = s.args::<4>()?;
-    let dd = s.this_obj()?;
     let clsid = s.read_guid(clsid_p)?;
     if clsid != IID_RGB_DEVICE && clsid != IID_HAL_DEVICE && clsid != IID_TNL_HAL_DEVICE {
         return Ok(ApiRet::Ret(D3DERR_INVALID_DEVICE));
     }
+    create_device(s, clsid, target_p, pp, &IDIRECT3DDEVICE7, None)
+}
+
+/// Create a device rendering to the surface `target_p` and return it as `def`.
+pub(super) fn create_device(
+    s: &mut Session,
+    clsid: Guid,
+    target_p: u32,
+    pp: u32,
+    def: &'static IfaceDef,
+    v3: Option<Box<super::d3d6::Dev3>>,
+) -> ApiResult {
+    let dd = s.this_obj()?;
     let Some(target) = s.surface_obj_of_ptr(target_p) else {
         return Ok(ApiRet::Ret(D3DERR_INVALIDCALL));
     };
@@ -702,10 +723,12 @@ fn d3d_create_device(s: &mut Session) -> ApiResult {
         blocks: BTreeMap::new(),
         recording: None,
         next_block: 1,
+        v3,
+        proj_adjust: None,
     };
     s.com_addref(target);
     let id = s.com_new(ComKind::Device(Box::new(dev)));
-    s.out_iface(pp, id, &IDIRECT3DDEVICE7)?;
+    s.out_iface(pp, id, def)?;
     // Direct3D switches the x87 unit to single precision unless asked to preserve it.
     if s.com.ddraw.coop_flags & super::ddraw::DDSCL_FPUPRESERVE == 0 {
         let mut r = s.cpu.read_regs();
@@ -715,7 +738,7 @@ fn d3d_create_device(s: &mut Session) -> ApiResult {
     Ok(ApiRet::Ret(D3D_OK))
 }
 
-fn depth_of(s: &Session, target: u32) -> Option<u32> {
+pub(super) fn depth_of(s: &Session, target: u32) -> Option<u32> {
     let ComKind::Surface(sf) = &s.com_obj(target)?.kind else {
         return None;
     };
@@ -740,6 +763,10 @@ fn depth_of(s: &Session, target: u32) -> Option<u32> {
 
 fn d3d_create_vertex_buffer(s: &mut Session) -> ApiResult {
     let [_this, pdesc, pp, _flags] = s.args::<4>()?;
+    create_vertex_buffer(s, pdesc, pp, &IDIRECT3DVERTEXBUFFER7)
+}
+
+pub(super) fn create_vertex_buffer(s: &mut Session, pdesc: u32, pp: u32, def: &'static IfaceDef) -> ApiResult {
     let caps = s.mem.read_u32(pdesc + 4)?;
     let fvf = s.mem.read_u32(pdesc + 8)?;
     let count = s.mem.read_u32(pdesc + 12)?;
@@ -760,17 +787,17 @@ fn d3d_create_vertex_buffer(s: &mut Session) -> ApiResult {
         caps,
         locks: 0,
     }));
-    s.out_iface(pp, id, &IDIRECT3DVERTEXBUFFER7)?;
+    s.out_iface(pp, id, def)?;
     Ok(ApiRet::Ret(D3D_OK))
 }
 
-fn d3d_evict_managed_textures(_s: &mut Session) -> ApiResult {
+pub(super) fn d3d_evict_managed_textures(_s: &mut Session) -> ApiResult {
     Ok(ApiRet::Ret(D3D_OK))
 }
 
 // ---------------------------------------------------------------- FVF
 
-fn fvf_stride(fvf: u32) -> u32 {
+pub(super) fn fvf_stride(fvf: u32) -> u32 {
     let mut n = match fvf & 0xe {
         0x2 => 12,
         0x4 => 16,
@@ -811,7 +838,7 @@ fn color_rgba(c: u32) -> [u8; 4] {
 
 /// Strided source description: (address, stride) per component.
 #[derive(Default, Clone, Copy)]
-struct Streams {
+pub(super) struct Streams {
     pos: (u32, u32),
     normal: (u32, u32),
     diffuse: (u32, u32),
@@ -819,7 +846,7 @@ struct Streams {
     tex: [(u32, u32); 8],
 }
 
-fn streams_from_fvf(base: u32, fvf: u32) -> Streams {
+pub(super) fn streams_from_fvf(base: u32, fvf: u32) -> Streams {
     let stride = fvf_stride(fvf);
     let mut o = match fvf & 0xe {
         0x2 => 12,
@@ -861,7 +888,13 @@ fn streams_from_fvf(base: u32, fvf: u32) -> Streams {
     st
 }
 
-fn read_vertices(s: &Session, st: &Streams, fvf: u32, first: u32, count: u32) -> Result<Vec<gfx::Vertex>, ApiError> {
+pub(super) fn read_vertices(
+    s: &Session,
+    st: &Streams,
+    fvf: u32,
+    first: u32,
+    count: u32,
+) -> Result<Vec<gfx::Vertex>, ApiError> {
     if count == 0 {
         return Ok(Vec::new());
     }
@@ -1024,11 +1057,11 @@ fn primitive_indices(prim: u32, n: u32, indices: Option<&[u32]>) -> Option<(gfx:
 
 // ---------------------------------------------------------------- device helpers
 
-fn dev_id(s: &Session) -> Result<u32, ApiError> {
+pub(super) fn dev_id(s: &Session) -> Result<u32, ApiError> {
     s.this_obj()
 }
 
-fn with_dev<T>(s: &mut Session, f: impl FnOnce(&mut Device) -> T) -> Result<T, ApiError> {
+pub(super) fn with_dev<T>(s: &mut Session, f: impl FnOnce(&mut Device) -> T) -> Result<T, ApiError> {
     let id = dev_id(s)?;
     match &mut s.com_obj_mut(id).unwrap().kind {
         ComKind::Device(d) => Ok(f(d)),
@@ -1044,7 +1077,7 @@ fn dev_ref(s: &Session) -> Result<&Device, ApiError> {
     }
 }
 
-fn dev_clone(s: &Session) -> Result<Device, ApiError> {
+pub(super) fn dev_clone(s: &Session) -> Result<Device, ApiError> {
     let id = dev_id(s)?;
     match &s.com_obj(id).unwrap().kind {
         ComKind::Device(d) => Ok((**d).clone()),
@@ -1060,7 +1093,7 @@ fn read_matrix(s: &Session, p: u32) -> Result<[f32; 16], ApiError> {
     Ok(m)
 }
 
-fn mat_mul(a: &[f32; 16], b: &[f32; 16]) -> [f32; 16] {
+pub(super) fn mat_mul(a: &[f32; 16], b: &[f32; 16]) -> [f32; 16] {
     // Row-major (D3D) product a * b.
     let mut r = [0f32; 16];
     for i in 0..4 {
@@ -1195,7 +1228,10 @@ fn build_uniforms(s: &Session, d: &Device, pretransformed: bool, fvf: u32, tw: f
     let proj = d.transforms.get(&3).copied().unwrap_or(IDENTITY);
     u.world = world;
     u.view = view;
-    u.proj = proj;
+    u.proj = match &d.proj_adjust {
+        Some(a) => mat_mul(&proj, a),
+        None => proj,
+    };
     u.normal_mat = normal_matrix(&mat_mul(&world, &view));
     u.rt = [tw, th, d.viewport.w.max(1) as f32, d.viewport.h.max(1) as f32];
     let rs = &d.rs;
@@ -1340,7 +1376,7 @@ fn pipe_for(d: &Device, topology: gfx::Topology, has_depth: bool) -> gfx::PipeKe
 }
 
 /// Issue a draw with vertices already decoded.
-fn submit_draw(
+pub(super) fn submit_draw(
     s: &mut Session,
     prim: u32,
     fvf: u32,
@@ -1434,7 +1470,7 @@ fn submit_draw(
 
 // ---------------------------------------------------------------- IDirect3DDevice7 methods
 
-fn dev_get_caps(s: &mut Session) -> ApiResult {
+pub(super) fn dev_get_caps(s: &mut Session) -> ApiResult {
     let [_this, p] = s.args::<2>()?;
     let d = dev_clone(s)?;
     let desc = device_desc(d.kind == IID_TNL_HAL_DEVICE, d.kind != IID_RGB_DEVICE);
@@ -1442,7 +1478,7 @@ fn dev_get_caps(s: &mut Session) -> ApiResult {
     Ok(ApiRet::Ret(D3D_OK))
 }
 
-fn dev_enum_texture_formats(s: &mut Session) -> ApiResult {
+pub(super) fn dev_enum_texture_formats(s: &mut Session) -> ApiResult {
     let [_this, cb, ctx] = s.args::<3>()?;
     let fmts = [
         Fmt::Rgb565,
@@ -1462,7 +1498,7 @@ fn dev_enum_texture_formats(s: &mut Session) -> ApiResult {
     enum_callbacks(cb, items, 0, D3D_OK)
 }
 
-fn dev_begin_scene(s: &mut Session) -> ApiResult {
+pub(super) fn dev_begin_scene(s: &mut Session) -> ApiResult {
     let r = with_dev(s, |d| {
         if d.in_scene {
             D3DERR_SCENE_IN_SCENE
@@ -1474,7 +1510,7 @@ fn dev_begin_scene(s: &mut Session) -> ApiResult {
     Ok(ApiRet::Ret(r))
 }
 
-fn dev_end_scene(s: &mut Session) -> ApiResult {
+pub(super) fn dev_end_scene(s: &mut Session) -> ApiResult {
     let r = with_dev(s, |d| {
         if !d.in_scene {
             D3DERR_SCENE_NOT_IN_SCENE
@@ -1494,7 +1530,7 @@ fn dev_get_direct3d(s: &mut Session) -> ApiResult {
     Ok(ApiRet::Ret(D3D_OK))
 }
 
-fn dev_set_render_target(s: &mut Session) -> ApiResult {
+pub(super) fn dev_set_render_target(s: &mut Session) -> ApiResult {
     let [_this, surf, _flags] = s.args::<3>()?;
     let Some(t) = s.surface_obj_of_ptr(surf) else {
         return Ok(ApiRet::Ret(D3DERR_INVALIDCALL));
@@ -1528,16 +1564,34 @@ fn dev_get_render_target(s: &mut Session) -> ApiResult {
 fn dev_clear(s: &mut Session) -> ApiResult {
     let [_this, count, rects, flags, color, z, _stencil] = s.args::<7>()?;
     let d = dev_clone(s)?;
-    let Some(target) = s.surface_of_obj(d.target) else {
-        return Ok(ApiRet::Ret(D3DERR_INVALIDCALL));
-    };
-    let depth = depth_of(s, d.target);
     let vp = Rect::new(
         d.viewport.x as i32,
         d.viewport.y as i32,
         (d.viewport.x + d.viewport.w) as i32,
         (d.viewport.y + d.viewport.h) as i32,
     );
+    Ok(ApiRet::Ret(clear_rects(
+        s, d.target, vp, count, rects, flags, color, z,
+    )?))
+}
+
+/// Clear `count` D3DRECTs at `rects` (or the whole viewport `vp`) of a render target
+/// surface object and its depth buffer.
+#[allow(clippy::too_many_arguments)]
+pub(super) fn clear_rects(
+    s: &mut Session,
+    target_obj: u32,
+    vp: Rect,
+    count: u32,
+    rects: u32,
+    flags: u32,
+    color: u32,
+    z: u32,
+) -> Result<u32, ApiError> {
+    let Some(target) = s.surface_of_obj(target_obj) else {
+        return Ok(D3DERR_INVALIDCALL);
+    };
+    let depth = depth_of(s, target_obj);
     let mut list = Vec::new();
     if count == 0 || rects == 0 {
         list.push(vp);
@@ -1574,7 +1628,7 @@ fn dev_clear(s: &mut Session) -> ApiResult {
             p.cpu_dirty = false;
         }
     }
-    Ok(ApiRet::Ret(D3D_OK))
+    Ok(D3D_OK)
 }
 
 fn record<F: FnOnce(&mut StateBlock)>(d: &mut Device, f: F) -> bool {
@@ -1586,7 +1640,7 @@ fn record<F: FnOnce(&mut StateBlock)>(d: &mut Device, f: F) -> bool {
     }
 }
 
-fn dev_set_transform(s: &mut Session) -> ApiResult {
+pub(super) fn dev_set_transform(s: &mut Session) -> ApiResult {
     let [_this, ty, pm] = s.args::<3>()?;
     let m = read_matrix(s, pm)?;
     with_dev(s, |d| {
@@ -1599,7 +1653,7 @@ fn dev_set_transform(s: &mut Session) -> ApiResult {
     Ok(ApiRet::Ret(D3D_OK))
 }
 
-fn dev_get_transform(s: &mut Session) -> ApiResult {
+pub(super) fn dev_get_transform(s: &mut Session) -> ApiResult {
     let [_this, ty, pm] = s.args::<3>()?;
     let m = with_dev(s, |d| d.transforms.get(&ty).copied().unwrap_or(IDENTITY))?;
     for (i, v) in m.iter().enumerate() {
@@ -1608,7 +1662,7 @@ fn dev_get_transform(s: &mut Session) -> ApiResult {
     Ok(ApiRet::Ret(D3D_OK))
 }
 
-fn dev_multiply_transform(s: &mut Session) -> ApiResult {
+pub(super) fn dev_multiply_transform(s: &mut Session) -> ApiResult {
     let [_this, ty, pm] = s.args::<3>()?;
     let m = read_matrix(s, pm)?;
     with_dev(s, |d| {
@@ -1648,7 +1702,7 @@ fn dev_get_viewport(s: &mut Session) -> ApiResult {
     Ok(ApiRet::Ret(D3D_OK))
 }
 
-fn read_color4(s: &Session, p: u32) -> Result<[f32; 4], ApiError> {
+pub(super) fn read_color4(s: &Session, p: u32) -> Result<[f32; 4], ApiError> {
     Ok([
         s.mem.read_f32(p)?,
         s.mem.read_f32(p + 4)?,
@@ -1780,7 +1834,7 @@ fn dev_get_light_enable(s: &mut Session) -> ApiResult {
     }
 }
 
-fn dev_set_render_state(s: &mut Session) -> ApiResult {
+pub(super) fn dev_set_render_state(s: &mut Session) -> ApiResult {
     let [_this, st, v] = s.args::<3>()?;
     if st >= 256 {
         return Ok(ApiRet::Ret(D3DERR_INVALIDCALL));
@@ -1805,7 +1859,7 @@ fn dev_set_render_state(s: &mut Session) -> ApiResult {
     Ok(ApiRet::Ret(D3D_OK))
 }
 
-fn dev_get_render_state(s: &mut Session) -> ApiResult {
+pub(super) fn dev_get_render_state(s: &mut Session) -> ApiResult {
     let [_this, st, p] = s.args::<3>()?;
     if st >= 256 {
         return Ok(ApiRet::Ret(D3DERR_INVALIDCALL));
@@ -1815,7 +1869,7 @@ fn dev_get_render_state(s: &mut Session) -> ApiResult {
     Ok(ApiRet::Ret(D3D_OK))
 }
 
-fn dev_set_texture(s: &mut Session) -> ApiResult {
+pub(super) fn dev_set_texture(s: &mut Session) -> ApiResult {
     let [_this, stage, tex] = s.args::<3>()?;
     if stage >= 8 {
         return Ok(ApiRet::Ret(D3DERR_INVALIDCALL));
@@ -1867,7 +1921,7 @@ fn dev_get_texture(s: &mut Session) -> ApiResult {
     Ok(ApiRet::Ret(D3D_OK))
 }
 
-fn dev_set_texture_stage_state(s: &mut Session) -> ApiResult {
+pub(super) fn dev_set_texture_stage_state(s: &mut Session) -> ApiResult {
     let [_this, stage, ty, v] = s.args::<4>()?;
     if stage >= 8 || ty >= 32 {
         return Ok(ApiRet::Ret(D3DERR_INVALIDCALL));
@@ -1902,7 +1956,7 @@ fn dev_set_texture_stage_state(s: &mut Session) -> ApiResult {
     Ok(ApiRet::Ret(D3D_OK))
 }
 
-fn dev_get_texture_stage_state(s: &mut Session) -> ApiResult {
+pub(super) fn dev_get_texture_stage_state(s: &mut Session) -> ApiResult {
     let [_this, stage, ty, p] = s.args::<4>()?;
     if stage >= 8 || ty >= 32 {
         return Ok(ApiRet::Ret(D3DERR_INVALIDCALL));
@@ -1912,7 +1966,7 @@ fn dev_get_texture_stage_state(s: &mut Session) -> ApiResult {
     Ok(ApiRet::Ret(D3D_OK))
 }
 
-fn dev_validate_device(s: &mut Session) -> ApiResult {
+pub(super) fn dev_validate_device(s: &mut Session) -> ApiResult {
     let [_this, p] = s.args::<2>()?;
     if p != 0 {
         s.mem.write_u32(p, 1)?;
@@ -1920,7 +1974,7 @@ fn dev_validate_device(s: &mut Session) -> ApiResult {
     Ok(ApiRet::Ret(D3D_OK))
 }
 
-fn dev_draw_primitive(s: &mut Session) -> ApiResult {
+pub(super) fn dev_draw_primitive(s: &mut Session) -> ApiResult {
     let [_this, prim, fvf, verts, count, _flags] = s.args::<6>()?;
     if fvf_stride(fvf) == 0 {
         return Ok(ApiRet::Ret(D3DERR_INVALIDVERTEXTYPE));
@@ -1930,7 +1984,7 @@ fn dev_draw_primitive(s: &mut Session) -> ApiResult {
     Ok(ApiRet::Ret(submit_draw(s, prim, fvf, v, None)?))
 }
 
-fn read_indices16(s: &Session, p: u32, n: u32) -> Result<Vec<u32>, ApiError> {
+pub(super) fn read_indices16(s: &Session, p: u32, n: u32) -> Result<Vec<u32>, ApiError> {
     let raw = s.mem.read_vec(p, n * 2)?;
     Ok(raw
         .as_chunks::<2>()
@@ -1940,7 +1994,7 @@ fn read_indices16(s: &Session, p: u32, n: u32) -> Result<Vec<u32>, ApiError> {
         .collect())
 }
 
-fn dev_draw_indexed_primitive(s: &mut Session) -> ApiResult {
+pub(super) fn dev_draw_indexed_primitive(s: &mut Session) -> ApiResult {
     let [_this, prim, fvf, verts, vcount, idx, icount, _flags] = s.args::<8>()?;
     if fvf_stride(fvf) == 0 {
         return Ok(ApiRet::Ret(D3DERR_INVALIDVERTEXTYPE));
@@ -1983,14 +2037,14 @@ fn mask_streams(mut st: Streams, fvf: u32) -> Streams {
     st
 }
 
-fn dev_draw_primitive_strided(s: &mut Session) -> ApiResult {
+pub(super) fn dev_draw_primitive_strided(s: &mut Session) -> ApiResult {
     let [_this, prim, fvf, data, count, _flags] = s.args::<6>()?;
     let st = mask_streams(read_strided(s, data)?, fvf);
     let v = read_vertices(s, &st, fvf, 0, count)?;
     Ok(ApiRet::Ret(submit_draw(s, prim, fvf, v, None)?))
 }
 
-fn dev_draw_indexed_primitive_strided(s: &mut Session) -> ApiResult {
+pub(super) fn dev_draw_indexed_primitive_strided(s: &mut Session) -> ApiResult {
     let [_this, prim, fvf, data, vcount, idx, icount, _flags] = s.args::<8>()?;
     let st = mask_streams(read_strided(s, data)?, fvf);
     let v = read_vertices(s, &st, fvf, 0, vcount)?;
@@ -1998,14 +2052,14 @@ fn dev_draw_indexed_primitive_strided(s: &mut Session) -> ApiResult {
     Ok(ApiRet::Ret(submit_draw(s, prim, fvf, v, Some(i))?))
 }
 
-fn vb_of(s: &Session, ptr: u32) -> Option<VertexBuffer> {
+pub(super) fn vb_of(s: &Session, ptr: u32) -> Option<VertexBuffer> {
     match &s.com_obj(s.obj_of(ptr)?)?.kind {
         ComKind::VertexBuffer(v) => Some(v.clone()),
         _ => None,
     }
 }
 
-fn dev_draw_primitive_vb(s: &mut Session) -> ApiResult {
+pub(super) fn dev_draw_primitive_vb(s: &mut Session) -> ApiResult {
     let [_this, prim, vb, start, count, _flags] = s.args::<6>()?;
     let Some(vb) = vb_of(s, vb) else {
         return Ok(ApiRet::Ret(D3DERR_INVALIDCALL));
@@ -2038,13 +2092,13 @@ fn dev_draw_indexed_primitive_vb(s: &mut Session) -> ApiResult {
     Ok(ApiRet::Ret(submit_draw(s, prim, vb.fvf, v, Some(i))?))
 }
 
-fn dev_set_clip_status(s: &mut Session) -> ApiResult {
+pub(super) fn dev_set_clip_status(s: &mut Session) -> ApiResult {
     let [_this, p] = s.args::<2>()?;
     let b = s.mem.read_vec(p, 24)?;
     with_dev(s, |d| d.clip_status.copy_from_slice(&b))?;
     Ok(ApiRet::Ret(D3D_OK))
 }
-fn dev_get_clip_status(s: &mut Session) -> ApiResult {
+pub(super) fn dev_get_clip_status(s: &mut Session) -> ApiResult {
     let [_this, p] = s.args::<2>()?;
     let b = with_dev(s, |d| d.clip_status)?;
     s.mem.write(p, &b)?;
@@ -2246,7 +2300,7 @@ fn dev_get_info(_s: &mut Session) -> ApiResult {
     Ok(ApiRet::Ret(S_FALSE))
 }
 
-fn dev_compute_sphere_visibility(s: &mut Session) -> ApiResult {
+pub(super) fn dev_compute_sphere_visibility(s: &mut Session) -> ApiResult {
     let [_this, centers, radii, n, _flags, results] = s.args::<6>()?;
     let d = dev_clone(s)?;
     let world = d.transforms.get(&1).copied().unwrap_or(IDENTITY);
@@ -2306,7 +2360,7 @@ fn vb_set(s: &mut Session, id: u32, v: VertexBuffer) {
     }
 }
 
-fn vb_lock(s: &mut Session) -> ApiResult {
+pub(super) fn vb_lock(s: &mut Session) -> ApiResult {
     let [_this, _flags, pp, psize] = s.args::<4>()?;
     let (id, mut v) = vb_self(s)?;
     s.mem.write_u32(pp, v.mem)?;
@@ -2318,14 +2372,14 @@ fn vb_lock(s: &mut Session) -> ApiResult {
     Ok(ApiRet::Ret(D3D_OK))
 }
 
-fn vb_unlock(s: &mut Session) -> ApiResult {
+pub(super) fn vb_unlock(s: &mut Session) -> ApiResult {
     let (id, mut v) = vb_self(s)?;
     v.locks = v.locks.saturating_sub(1);
     vb_set(s, id, v);
     Ok(ApiRet::Ret(D3D_OK))
 }
 
-fn vb_get_desc(s: &mut Session) -> ApiResult {
+pub(super) fn vb_get_desc(s: &mut Session) -> ApiResult {
     let [_this, p] = s.args::<2>()?;
     let (_id, v) = vb_self(s)?;
     s.mem.write_u32(p + 4, v.caps)?;
@@ -2334,7 +2388,7 @@ fn vb_get_desc(s: &mut Session) -> ApiResult {
     Ok(ApiRet::Ret(D3D_OK))
 }
 
-fn vb_optimize(s: &mut Session) -> ApiResult {
+pub(super) fn vb_optimize(s: &mut Session) -> ApiResult {
     let (id, mut v) = vb_self(s)?;
     v.caps |= 0x8000_0000; // D3DVBCAPS_OPTIMIZED
     vb_set(s, id, v);
@@ -2343,7 +2397,7 @@ fn vb_optimize(s: &mut Session) -> ApiResult {
 
 // ---------------------------------------------------------------- interface tables
 
-pub static TEXTURE_IFACES: &[&IfaceDef] = &[];
+pub static TEXTURE_IFACES: &[&IfaceDef] = &[&super::d3d6::IDIRECT3DTEXTURE2];
 
 pub static IDIRECT3D7: IfaceDef = IfaceDef {
     name: "IDirect3D7",
