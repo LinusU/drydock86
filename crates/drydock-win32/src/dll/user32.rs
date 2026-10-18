@@ -295,6 +295,11 @@ pub struct UserState {
     /// Pending DeferWindowPos lists by HDWP.
     #[serde(default)]
     pub defer: BTreeMap<u32, Vec<DeferredPos>>,
+    #[serde(default)]
+    pub menus: BTreeMap<u32, crate::dll::menu::Menu>,
+    /// System menus by window.
+    #[serde(default)]
+    pub system_menus: BTreeMap<u32, u32>,
 }
 
 impl Default for UserState {
@@ -333,6 +338,8 @@ impl Default for UserState {
             hooks: Vec::new(),
             next_hook: 0,
             defer: BTreeMap::new(),
+            menus: BTreeMap::new(),
+            system_menus: BTreeMap::new(),
         }
     }
 }
@@ -367,7 +374,7 @@ const CXFRAME: i32 = 4;
 const CYCAPTION: i32 = 19;
 const CXDLGFRAME: i32 = 3;
 const CXBORDER: i32 = 1;
-const CYMENU: i32 = 19;
+pub const CYMENU: i32 = 19;
 const CXEDGE: i32 = 2;
 
 /// Non-client insets (left, top, right, bottom) for a style.

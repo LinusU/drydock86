@@ -1702,7 +1702,21 @@ pub fn paint_dialog_frame(s: &mut Session, hwnd: u32) -> Result<(), ApiError> {
     let (ww, wh) = (w.rect.w(), w.rect.h());
     super::gdi32::fill_solid(s, hdc, &Rect::new(0, 0, ww, wh), 0xc8d0d4)?;
     draw_edge(s, hdc, ww, wh, 0xffffff, 0x404040)?;
+    let menu = s.menu_bar_items(hwnd);
     let ins = nc_insets(w.style, w.exstyle, false);
+    if let Some(items) = menu {
+        // The menu bar sits between the caption and the client area.
+        let top = w.client.top - w.rect.top - CYMENU;
+        let bar = Rect::new(ins.left, top, ww - ins.left, top + CYMENU);
+        super::gdi32::fill_solid(s, hdc, &bar, 0xc8d0d4)?;
+        let f = super::gdi32::create_font(s, -11, "Tahoma");
+        let mut x = bar.left + 6;
+        for t in items {
+            let r = Rect::new(x, bar.top, bar.right, bar.bottom);
+            super::gdi32::draw_label(s, hdc, f, &t, &r, 0x20 | 0x4, 0)?;
+            x += 7 * t.chars().count() as i32 + 14;
+        }
+    }
     if w.style & WS_CAPTION == WS_CAPTION {
         let cap = Rect::new(ins.left, ins.left, ww - ins.left, ins.top - 1);
         super::gdi32::fill_solid(s, hdc, &cap, 0x6a240a)?;
