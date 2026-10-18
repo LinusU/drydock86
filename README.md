@@ -40,7 +40,7 @@ to an in-memory overlay, which `--overlay <dir>` persists across runs.
 Interactive play (desktop window, realtime pacing, host audio and input):
 
 ```bash
-drydock run --mode play --exe Midtown2.exe --root /path/to/installation --overlay local/overlay --audio device
+drydock run --mode play --exe Midtown2.exe --root /path/to/installation --overlay local/overlay
 ```
 
 Headless, scripted, no window and no audio device:
@@ -60,7 +60,7 @@ Other useful options (see `drydock run --help`):
 | --- | --- |
 | `--seconds N` | Run for N seconds of virtual time (headless without a scenario). |
 | `--pacing realtime\|unthrottled` | Headless pacing (default unthrottled). |
-| `--audio device\|wav:<file>\|discard\|none` | Audio output; parts can be combined with `+`. |
+| `--audio device\|wav:<file>\|discard\|none` | Audio output; parts can be combined with `+`. Defaults to `device` in play mode and `none` headless. |
 | `--overlay <dir>` | Persist guest file and registry changes in this directory. |
 | `--reg <file.reg>` | Import registry entries before start. |
 | `--restore <file.ddck>` | Start from a disk checkpoint instead of process start. |

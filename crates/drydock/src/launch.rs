@@ -60,9 +60,10 @@ pub struct RunArgs {
     #[arg(long)]
     pub artifacts: Option<PathBuf>,
     /// Audio output: none (virtual device only), discard (mix and drop), device, or
-    /// wav:<path> (capture). Several may be combined with '+'.
-    #[arg(long, default_value = "none")]
-    pub audio: String,
+    /// wav:<path> (capture). Several may be combined with '+'. Default: device in play
+    /// mode, none headless.
+    #[arg(long)]
+    pub audio: Option<String>,
     /// Request the graphics backend's software (fallback) adapter.
     #[arg(long)]
     pub software_gpu: bool,
@@ -174,6 +175,17 @@ pub fn build_session(a: &RunArgs) -> Result<Session> {
     Ok(s)
 }
 
+impl RunArgs {
+    /// The audio output, defaulting to the host device when playing.
+    pub fn audio_spec(&self) -> &str {
+        match (&self.audio, self.mode) {
+            (Some(a), _) => a,
+            (None, Mode::Play) => "device",
+            (None, Mode::Headless) => "none",
+        }
+    }
+}
+
 pub fn audio_sink(spec: &str) -> Result<Option<Box<dyn drydock_audio::AudioSink>>> {
     let mut sinks: Vec<Box<dyn drydock_audio::AudioSink>> = Vec::new();
     for part in spec.split('+') {
@@ -203,7 +215,7 @@ pub fn configure_host(s: &mut Session, a: &RunArgs) -> Result<()> {
         software: a.software_gpu,
         backends: a.gpu_backend.clone(),
     };
-    s.host.audio = audio_sink(&a.audio)?;
+    s.host.audio = audio_sink(a.audio_spec())?;
     s.user.input.joy_present = a.joystick;
     Ok(())
 }
@@ -228,7 +240,7 @@ pub fn provenance(s: &Session, a: &RunArgs) -> serde_json::Value {
         "windows_profile": s.config.windows,
         "cpu_profile": s.config.cpu,
         "pacing": a.pacing,
-        "audio": a.audio,
+        "audio": a.audio_spec(),
         "gpu": s.host.renderer.as_ref().map(|r| serde_json::to_value(&r.gpu.report).unwrap()),
         "gpu_error": s.host.gpu_error,
         "modules": modules,
