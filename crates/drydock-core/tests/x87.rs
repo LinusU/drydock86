@@ -30,7 +30,7 @@ fn x80_from_f64(d: f64) -> [u8; 10] {
         (0x7fff, (1 << 63) | (frac << 11))
     } else if e == 0 {
         let lz = frac.leading_zeros() as i32 - 11;
-        ((1 - 1023 + 0x3fff - lz) as u16, (frac << (11 + lz)) | 0)
+        ((1 - 1023 + 0x3fff - lz) as u16, frac << (11 + lz))
     } else {
         ((e - 1023 + 0x3fff) as u16, (1 << 63) | (frac << 11))
     };
@@ -44,7 +44,7 @@ fn random_operand(r: &mut Rng) -> [u8; 10] {
     match r.next() % 8 {
         // Typical values: moderate exponent, exactly a double.
         0..=3 => {
-            let e = 1023 - 20 + (r.next() % 40) as u64;
+            let e = 1023 - 20 + r.next() % 40;
             x80_from_f64(f64::from_bits(
                 (r.next() & 1) << 63 | e << 52 | (r.next() & ((1 << 52) - 1)),
             ))
