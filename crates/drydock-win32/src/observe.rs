@@ -151,6 +151,8 @@ impl Session {
         match self.user.dialogs.iter_mut().find(|d| d.answer.is_none()) {
             Some(d) => {
                 d.answer = Some(button);
+                let id = d.id;
+                crate::dll::dialog::answer_message_box(self, id, button);
                 true
             }
             None => false,

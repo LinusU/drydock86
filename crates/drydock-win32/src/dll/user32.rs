@@ -2024,6 +2024,22 @@ fn send_message_a(s: &mut Session) -> ApiResult {
     ))
 }
 
+/// Post WM_NULL to `hwnd` so a thread waiting for messages runs its loop again.
+pub(crate) fn wake_window(s: &mut Session, hwnd: u32) {
+    let Some(tid) = s.window(hwnd).map(|w| w.tid) else {
+        return;
+    };
+    let time = s.msg_time();
+    s.queue(tid).posted.push_back(Msg {
+        hwnd,
+        message: 0,
+        wparam: 0,
+        lparam: 0,
+        time,
+        pt: (0, 0),
+    });
+}
+
 fn post_message_a(s: &mut Session) -> ApiResult {
     let [hwnd, msg, wp, lp] = s.args::<4>()?;
     let tid = if hwnd == 0 {
@@ -3011,7 +3027,7 @@ fn wvsprintf_a(s: &mut Session) -> ApiResult {
 // ---------------------------------------------------------------- dialogs
 
 pub(crate) fn message_box_a(s: &mut Session) -> ApiResult {
-    let [_hwnd, text, caption, style] = s.args::<4>()?;
+    let [hwnd, text, caption, style] = s.args::<4>()?;
     let text = s.read_str_opt(text)?.unwrap_or_default();
     let caption = s.read_str_opt(caption)?.unwrap_or_else(|| "Error".into());
     let id = s.user.next_dialog;
@@ -3033,14 +3049,20 @@ pub(crate) fn message_box_a(s: &mut Session) -> ApiResult {
         format!("MessageBox #{id} {caption:?}: {text:?} (style {style:#x}, default {def})"),
     );
     let tid = s.tid();
+    let auto = s.user.auto_dismiss_dialogs;
     s.user.dialogs.push(Dialog {
         id,
         tid,
-        text,
-        caption,
+        text: text.clone(),
+        caption: caption.clone(),
         style,
-        answer: if s.user.auto_dismiss_dialogs { Some(def) } else { None },
+        answer: if auto { Some(def) } else { None },
     });
+    if !auto {
+        // Shown as a modal dialog; scenarios can still answer it.
+        let owner = if s.window(hwnd).is_some() { hwnd } else { 0 };
+        return crate::dll::dialog::message_box(s, owner, id, &text, &caption, style);
+    }
     Ok(ApiRet::Block(Block {
         wait: WaitKind::Dialog { id },
         deadline: None,

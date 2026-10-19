@@ -44,6 +44,9 @@ pub struct DlgState {
     pub modal: bool,
     pub owner: u32,
     pub font: u32,
+    /// A MessageBox: the id of its [`Dialog`] record.
+    #[serde(default)]
+    pub msgbox: Option<u32>,
 }
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
@@ -83,6 +86,8 @@ pub enum DlgCont {
         data: Vec<u8>,
         rtf: bool,
     },
+    /// MessageBox: the modal loop returned the button.
+    MsgBoxDone { id: u32 },
 }
 
 impl Session {
@@ -420,6 +425,19 @@ fn create_dialog_common(
     let Some(t) = parse_template(&bytes) else {
         return Err(ApiError::Fatal("malformed dialog template".into()));
     };
+    create_dialog_from(s, &t, hinst, owner, dlgproc, param, modal, None)
+}
+
+fn create_dialog_from(
+    s: &mut Session,
+    t: &DlgTemplate,
+    hinst: u32,
+    owner: u32,
+    dlgproc: u32,
+    param: u32,
+    modal: bool,
+    msgbox: Option<u32>,
+) -> ApiResult {
     let mode = s.user.mode;
     let w = dlu_x(t.cx as i32);
     let h = dlu_y(t.cy as i32);
@@ -460,6 +478,7 @@ fn create_dialog_common(
         modal,
         owner,
         font,
+        msgbox,
     });
     let client = s.window(hdlg).unwrap().client;
     let mut steps = VecDeque::new();
@@ -822,6 +841,10 @@ pub fn resume(s: &mut Session, c: DlgCont, v: Resume) -> ApiResult {
         }
         DlgCont::Created { hdlg, modal, owner } => finish_creation(s, hdlg, modal, owner, v.eax()),
         DlgCont::Modal { hdlg, owner } | DlgCont::ModalDispatched { hdlg, owner } => modal_step(s, hdlg, owner),
+        DlgCont::MsgBoxDone { id } => {
+            s.user.dialogs.retain(|d| d.id != id);
+            Ok(ApiRet::Ret(v.eax()))
+        }
         DlgCont::Stream {
             hwnd,
             es,
@@ -873,6 +896,40 @@ fn def_dlg_proc_a(s: &mut Session) -> ApiResult {
 }
 
 fn def_dlg_default(s: &mut Session, hwnd: u32, msg: u32, wp: u32, lp: u32) -> ApiResult {
+    if let Some(id) = s.dlg(hwnd).and_then(|d| d.msgbox) {
+        match msg {
+            WM_INITDIALOG => {
+                // Focus goes to the default button.
+                let def = s
+                    .user
+                    .windows
+                    .values()
+                    .find(|w| w.parent == hwnd && w.class == "BUTTON" && w.style & 0xf == 1)
+                    .map(|w| w.hwnd)
+                    .unwrap_or(0);
+                return run_seq(s, VecDeque::from(vec![Step::Act(Act::Focus(def))]), 0);
+            }
+            WM_COMMAND => {
+                let mut button = wp & 0xffff;
+                let buttons: Vec<u32> = s
+                    .user
+                    .windows
+                    .values()
+                    .filter(|w| w.parent == hwnd && w.class == "BUTTON")
+                    .map(|w| w.id)
+                    .collect();
+                // Escape (IDCANCEL) answers OK in a box with only an OK button.
+                if button == 2 && buttons == [1] {
+                    button = 1;
+                }
+                if buttons.contains(&button) {
+                    end_message_box(s, hwnd, id, button);
+                }
+                return Ok(ApiRet::Ret(0));
+            }
+            _ => {}
+        }
+    }
     match msg {
         WM_INITDIALOG => Ok(ApiRet::Ret(1)),
         WM_CLOSE => send_command(s, hwnd, 2, BN_CLICKED),
@@ -889,6 +946,91 @@ fn def_dlg_default(s: &mut Session, hwnd: u32, msg: u32, wp: u32, lp: u32) -> Ap
         WM_NEXTDLGCTL => Ok(ApiRet::Ret(1)),
         _ => def_window_proc(s, hwnd, msg, wp, lp),
     }
+}
+
+fn end_message_box(s: &mut Session, hdlg: u32, id: u32, button: u32) {
+    if let Some(d) = s.dlg_mut(hdlg) {
+        d.ended = Some(button);
+    }
+    if let Some(d) = s.user.dialogs.iter_mut().find(|d| d.id == id) {
+        d.answer = Some(button);
+    }
+}
+
+/// Run MessageBox `id` (already recorded in `s.user.dialogs`) as a modal dialog with
+/// the standard buttons of `style`; returns the button chosen.
+pub fn message_box(s: &mut Session, owner: u32, id: u32, text: &str, caption: &str, style: u32) -> ApiResult {
+    ensure_system_classes(s);
+    let buttons: &[(u32, &str)] = match style & 0xf {
+        1 => &[(1, "OK"), (2, "Cancel")],
+        2 => &[(3, "&Abort"), (4, "&Retry"), (5, "&Ignore")],
+        3 => &[(6, "&Yes"), (7, "&No"), (2, "Cancel")],
+        4 => &[(6, "&Yes"), (7, "&No")],
+        5 => &[(4, "&Retry"), (2, "Cancel")],
+        _ => &[(1, "OK")],
+    };
+    let def = ((style >> 8) & 0xf) as usize % buttons.len();
+    // Layout in dialog units: 7-unit margins, 50x14 buttons 4 units apart, the text
+    // wrapped at about five eighths of the screen width.
+    let font = super::gdi32::create_font(s, -11, "MS Sans Serif");
+    let max_w = s.user.mode.width as i32 * 5 / 8;
+    let (tw, th) = super::gdi32::measure_label(s, font, text, max_w, 0x810);
+    s.gdi.objs.remove(&font);
+    let (tw, th) = ((tw * 4 + BASE_X - 1) / BASE_X + 2, (th * 8 + BASE_Y - 1) / BASE_Y);
+    let n = buttons.len() as i32;
+    let bw = n * 50 + (n - 1) * 4;
+    let cx = tw.max(bw) + 14;
+    let cy = 7 + th + 7 + 14 + 7;
+    let mut items = vec![DlgItem {
+        style: WS_VISIBLE | 0x80, // SS_LEFT | SS_NOPREFIX
+        exstyle: 0,
+        x: 7,
+        y: 7,
+        cx: tw as i16,
+        cy: th as i16,
+        id: 0xffff,
+        class: StrOrId::Id(0x82),
+        title: StrOrId::Str(text.to_string()),
+    }];
+    let mut x = (cx - bw) / 2;
+    for (i, &(bid, label)) in buttons.iter().enumerate() {
+        items.push(DlgItem {
+            style: WS_VISIBLE | 0x0001_0000 | (i == def) as u32, // WS_TABSTOP, BS_DEFPUSHBUTTON
+            exstyle: 0,
+            x: x as i16,
+            y: (cy - 7 - 14) as i16,
+            cx: 50,
+            cy: 14,
+            id: bid,
+            class: StrOrId::Id(0x80),
+            title: StrOrId::Str(label.to_string()),
+        });
+        x += 54;
+    }
+    let t = DlgTemplate {
+        // WS_POPUP | WS_CAPTION | WS_SYSMENU | DS_CENTER | DS_MODALFRAME | DS_SETFONT
+        style: 0x80c8_08c0,
+        exstyle: 0,
+        x: 0,
+        y: 0,
+        cx: cx as i16,
+        cy: cy as i16,
+        title: caption.to_string(),
+        font: Some((8, "MS Sans Serif".into())),
+        items,
+    };
+    let r = create_dialog_from(s, &t, 0, owner, 0, 0, true, Some(id))?;
+    chain_after(s, r, Cont::Dialog(DlgCont::MsgBoxDone { id }))
+}
+
+/// Answer an open MessageBox from outside the guest (scenarios, the protocol).
+pub fn answer_message_box(s: &mut Session, id: u32, button: u32) {
+    let Some(hdlg) = s.user.dialogs_mgr.iter().find(|d| d.msgbox == Some(id)).map(|d| d.hwnd) else {
+        return;
+    };
+    end_message_box(s, hdlg, id, button);
+    // Wake the modal loop.
+    wake_window(s, hdlg);
 }
 
 fn dialog_box_param_a(s: &mut Session) -> ApiResult {
@@ -1819,7 +1961,17 @@ fn paint_static(s: &mut Session, w: &Window) -> Result<(), ApiError> {
             2 => 0x2,
             _ => 0,
         };
-        super::gdi32::draw_label(s, hdc, font, &w.title, &Rect::new(0, 0, cw, ch), align | 0x10, 0)?;
+        // SS_NOPREFIX draws '&' as is (DT_NOPREFIX).
+        let prefix = if w.style & 0x80 != 0 { 0x800 } else { 0 };
+        super::gdi32::draw_label(
+            s,
+            hdc,
+            font,
+            &w.title,
+            &Rect::new(0, 0, cw, ch),
+            align | prefix | 0x10,
+            0,
+        )?;
     } else if ty == 3 {
         // SS_ICON: a neutral information glyph.
         super::gdi32::fill_solid(s, hdc, &Rect::new(0, 0, 32.min(cw), 32.min(ch)), 0xa56e3a)?;

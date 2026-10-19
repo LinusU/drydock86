@@ -437,6 +437,19 @@ pub fn draw_label(
     Ok(())
 }
 
+/// Size of `text` drawn with `font` and DrawText flags `fmt`, wrapped at `width`
+/// when `fmt` has DT_WORDBREAK.
+pub fn measure_label(s: &mut Session, font: u32, text: &str, width: i32, fmt: u32) -> (i32, i32) {
+    let lf = match s.gdi.objs.get(&font) {
+        Some(GdiObj::Font(lf)) => lf.clone(),
+        _ => system_font("MS Sans Serif", -11, 400),
+    };
+    let fi = font_inst(s, &lf);
+    let lines = layout_lines(&fi, text, width, fmt);
+    let w = lines.iter().map(|l| text_width(&fi, &l.0)).max().unwrap_or(0);
+    (w, lines.len() as i32 * (fi.ascent + fi.descent))
+}
+
 pub fn fill_rect(s: &mut Session) -> ApiResult {
     let [hdc, p, brush] = s.args::<3>()?;
     let r = s.read_rect(p)?;
