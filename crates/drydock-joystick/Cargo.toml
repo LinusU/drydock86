@@ -8,3 +8,8 @@ license.workspace = true
 [dependencies]
 log.workspace = true
 serde.workspace = true
+hidapi = { version = "2.6", optional = true, default-features = false, features = ["linux-native-basic-udev"] }
+
+[features]
+default = ["device"]
+device = ["dep:hidapi"]

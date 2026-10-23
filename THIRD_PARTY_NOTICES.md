@@ -35,6 +35,7 @@ tables were converted mechanically from the C sources.
 | iced-x86 | 1.21.0 (pinned) | MIT | Instruction decoding (counting), test assembler |
 | winit | 0.30 | Apache-2.0 | Desktop window and input |
 | cpal | 0.16 | Apache-2.0 | Host audio output |
+| hidapi (Rust crate, with the bundled C hidapi used on macOS and Windows) | 2.6 | MIT; C hidapi under BSD-3-Clause (chosen among its BSD, GPL-3.0 and original licences) | Host game controllers and force feedback |
 | fontdue | 0.9 | MIT OR Apache-2.0 OR Zlib | Font rasterization |
 | ttf-parser | 0.25 | MIT OR Apache-2.0 | Names and metrics of guest TrueType fonts |
 | slopmpeg | git rev `393f420` | MIT | MPEG-1 video and audio decoding (DirectShow movies) |
