@@ -46,6 +46,9 @@ DirectInput).
 | `{"click_here": "left"\|"right"\|"middle"}` | Click without moving the pointer (for cursors that programs draw from relative mouse motion). |
 | `{"mouse_move": [x, y]}` | Move the pointer (absolute screen coordinates). |
 | `{"mouse_rel": [dx, dy]}` | Relative motion, as from a captured mouse. |
+| `{"joy_axes": [x, y, throttle, twist]}` | Set the joystick axes (each 0–65535; needs `--joystick`). |
+| `{"joy_button_down": n}` / `{"joy_button_up": n}` | Press or release joystick button `n` (1–32). |
+| `{"joy_pov": angle}` | Point the hat (hundredths of a degree clockwise from north; -1 centres it). |
 | `{"release_all": true}` | Release every pressed key and button. |
 | `{"answer_dialog": id}` | Answer the open message box with button id (1 = OK, 2 = Cancel, 6 = Yes, 7 = No). |
 | `{"screenshot": "name.png"}` | Capture the displayed frame into the artifacts directory. |

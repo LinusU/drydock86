@@ -76,6 +76,21 @@ pub enum Step {
     MouseRel {
         mouse_rel: [i32; 2],
     },
+    /// Joystick axes 0..=65535: x, y, throttle, twist.
+    JoyAxes {
+        joy_axes: [u16; 4],
+    },
+    /// Joystick buttons, numbered from 1.
+    JoyButtonDown {
+        joy_button_down: u8,
+    },
+    JoyButtonUp {
+        joy_button_up: u8,
+    },
+    /// Hat in hundredths of a degree clockwise from north; -1 centres it.
+    JoyPov {
+        joy_pov: i64,
+    },
     Screenshot {
         screenshot: String,
     },
@@ -217,6 +232,12 @@ pub enum StepOutcome {
 }
 
 /// Execute one step. Observations it produces are appended to `log`.
+fn joy(d: &mut Driver, ev: InputEvent) -> Option<RunStop> {
+    let now = d.s.clock.now_ns();
+    d.s.user.input.schedule(now, ev);
+    advance(d, 10_000_000)
+}
+
 pub fn step(
     d: &mut Driver,
     ctx: &mut Ctx,
@@ -327,6 +348,30 @@ pub fn step(
                 },
             );
             advance(d, 10_000_000)
+        }
+        Step::JoyAxes { joy_axes: [x, y, z, r] } => joy(
+            d,
+            InputEvent::JoyAxes {
+                x: *x,
+                y: *y,
+                z: *z,
+                r: *r,
+            },
+        ),
+        Step::JoyButtonDown { joy_button_down: b } | Step::JoyButtonUp { joy_button_up: b } => {
+            if !(1..=32).contains(b) {
+                bail!("joystick buttons are numbered 1 to 32");
+            }
+            let down = matches!(step, Step::JoyButtonDown { .. });
+            joy(d, InputEvent::JoyButton { button: b - 1, down })
+        }
+        Step::JoyPov { joy_pov } => {
+            let pov = if *joy_pov < 0 {
+                u32::MAX
+            } else {
+                (*joy_pov % 36000) as u32
+            };
+            joy(d, InputEvent::JoyPov { pov })
         }
         Step::Screenshot { screenshot } => {
             let path = artifacts.join(screenshot);
