@@ -79,6 +79,26 @@ Other useful options (see `drydock run --help`):
 
 `drydock inspect --exe <file>` prints PE headers, sections, imports and hashes.
 
+## Joysticks and force feedback
+
+With `--joystick`, play mode uses the first game controller it finds (or one plugged
+in later) and plays the program's force-feedback effects on it when it is a USB PID
+force-feedback device, such as the Microsoft SideWinder Force Feedback 2. No driver
+is needed: Drydock talks to the controller through HID. Check a controller first:
+
+```bash
+drydock joystick --list
+drydock joystick --test-force-feedback --seconds 20
+```
+
+The second command prints the controls found, plays a few test effects (hold the
+stick loosely: the SideWinder only applies force with a hand on the grip), reports
+how many of them the stick confirmed playing, then shows live input. Controllers
+report only changes, and the SideWinder cannot be asked for its position, so move the
+throttle once after it connects. `--save-descriptor <file>` writes the
+controller's HID report descriptor, which is what to attach to a bug report. On
+Linux, the user needs access to the controller's `/dev/hidraw*` node (a udev rule).
+
 ## Agent protocol
 
 `drydock serve --stdio` accepts one JSON request per line and answers each with a

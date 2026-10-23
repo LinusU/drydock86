@@ -2,6 +2,7 @@
 
 mod driver;
 mod inspect;
+mod joystick;
 mod launch;
 mod player;
 mod scenario;
@@ -33,6 +34,8 @@ enum Cmd {
     },
     /// Launch a program.
     Run(Box<launch::RunArgs>),
+    /// Check a host game controller: detected controls, live input, force feedback.
+    Joystick(joystick::JoystickArgs),
     /// Serve the JSON control protocol.
     Serve {
         /// Exchange line-delimited JSON over stdin/stdout.
@@ -53,6 +56,7 @@ fn main() -> Result<()> {
     }
     match cli.cmd {
         Cmd::Inspect { exe, json } => inspect::run(&exe, json),
+        Cmd::Joystick(a) => joystick::run(a),
         Cmd::Serve { stdio } => {
             if !stdio {
                 anyhow::bail!("only --stdio is supported");
