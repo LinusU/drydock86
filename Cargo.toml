@@ -25,6 +25,7 @@ drydock-core = { path = "crates/drydock-core" }
 drydock-win32 = { path = "crates/drydock-win32" }
 drydock-gfx = { path = "crates/drydock-gfx" }
 drydock-audio = { path = "crates/drydock-audio" }
+drydock-joystick = { path = "crates/drydock-joystick", default-features = false }
 drydock-fixtures = { path = "crates/drydock-fixtures" }
 drydock-media = { path = "crates/drydock-media" }
 # MPEG-1 video, MP2 audio and program stream demuxing (DirectShow movies).

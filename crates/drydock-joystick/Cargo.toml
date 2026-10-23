@@ -1,0 +1,10 @@
+[package]
+name = "drydock-joystick"
+description = "Drydock joystick: force-feedback effect model, HID report descriptors, USB PID force feedback and host game controllers"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+log.workspace = true
+serde.workspace = true
