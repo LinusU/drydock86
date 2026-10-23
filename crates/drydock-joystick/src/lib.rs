@@ -4,3 +4,4 @@
 
 pub mod ff;
 pub mod hid;
+pub mod pid;
