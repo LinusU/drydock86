@@ -3307,7 +3307,10 @@ fn deliver_input(s: &mut Session, at: u64, ev: InputEvent) {
                 });
             }
         }
-        InputEvent::Focus { .. } | InputEvent::JoyAxes { .. } | InputEvent::JoyButton { .. } => {}
+        InputEvent::Focus { .. }
+        | InputEvent::JoyAxes { .. }
+        | InputEvent::JoyButton { .. }
+        | InputEvent::JoyPov { .. } => {}
     }
 }
 

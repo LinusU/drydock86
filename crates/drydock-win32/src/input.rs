@@ -35,7 +35,7 @@ pub enum InputEvent {
     Wheel {
         delta: i32,
     },
-    /// Joystick axes in the range 0..=65535 (x, y, z, r).
+    /// Joystick axes in the range 0..=65535: x, y, z (throttle), r (twist/rudder).
     JoyAxes {
         x: u16,
         y: u16,
@@ -45,6 +45,11 @@ pub enum InputEvent {
     JoyButton {
         button: u8,
         down: bool,
+    },
+    /// Point-of-view hat in hundredths of a degree clockwise from north, or
+    /// 4294967295 (0xFFFFFFFF) when centred.
+    JoyPov {
+        pov: u32,
     },
     /// The emulated window gained/lost host focus.
     Focus {
@@ -56,6 +61,12 @@ pub enum InputEvent {
 pub struct TimedInput {
     pub at_ns: u64,
     pub ev: InputEvent,
+}
+
+pub const POV_CENTERED: u32 = u32::MAX;
+
+fn pov_centered() -> u32 {
+    POV_CENTERED
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -70,6 +81,8 @@ pub struct InputState {
     pub joy_present: bool,
     pub joy_axes: [u16; 4],
     pub joy_buttons: u32,
+    #[serde(default = "pov_centered")]
+    pub joy_pov: u32,
     pub pending: VecDeque<TimedInput>,
     /// Applied events (with time), consumed by DirectInput devices.
     pub log: Vec<(u64, InputEvent)>,
@@ -91,6 +104,7 @@ impl Default for InputState {
             joy_present: false,
             joy_axes: [32768; 4],
             joy_buttons: 0,
+            joy_pov: POV_CENTERED,
             pending: VecDeque::new(),
             log: Vec::new(),
             log_base: 0,
@@ -194,6 +208,7 @@ impl InputState {
                     self.joy_buttons &= !(1 << button);
                 }
             }
+            InputEvent::JoyPov { pov } => self.joy_pov = pov,
             InputEvent::Wheel { .. } => {}
             InputEvent::Focus { active } => self.host_focus = active,
         }

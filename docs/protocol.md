@@ -85,8 +85,12 @@ Input events (the same JSON appears in recordings and `provenance.json`):
 {"type": "wheel", "delta": 120}
 {"type": "joy_axes", "x": 32768, "y": 0, "z": 32768, "r": 32768}
 {"type": "joy_button", "button": 0, "down": true}
+{"type": "joy_pov", "pov": 9000}
 {"type": "focus", "active": true}
 ```
+
+Joystick axes are 0–65535 (`z` is the throttle, `r` the twist); the hat (`pov`) is in
+hundredths of a degree clockwise from north, 4294967295 when centred.
 
 Scenario steps (`key`, `click`, `type`, …) are usually more convenient; send them
 with `step`. A recording can be replayed in a later session with the `replay_input`

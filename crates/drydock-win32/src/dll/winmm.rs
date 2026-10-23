@@ -277,7 +277,9 @@ fn joy_get_pos_ex(s: &mut Session) -> ApiResult {
         s.mem.write_u32(p + 8 + 4 * i as u32, *v)?;
     }
     s.mem.write_u32(p + 36, s.user.input.joy_buttons.count_ones())?;
-    s.mem.write_u32(p + 40, 0xffff)?; // POV centered
+    let pov = s.user.input.joy_pov;
+    s.mem
+        .write_u32(p + 40, if pov == crate::input::POV_CENTERED { 0xffff } else { pov })?;
     Ok(ApiRet::Ret(0))
 }
 
