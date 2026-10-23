@@ -139,6 +139,9 @@ pub struct ComState {
     /// Guest interface pointer → (object id, interface name).
     pub ptrs: BTreeMap<u32, (u32, String)>,
     pub initialized: u32,
+    /// GUIDs made by CoCreateGuid (they are derived from this count).
+    #[serde(default)]
+    pub guids_made: u32,
     pub ddraw: ddraw::DDrawGlobal,
     pub dsound: dsound::DSoundGlobal,
     pub dmusic: dmusic::DMusicGlobal,
