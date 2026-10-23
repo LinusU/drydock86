@@ -14,7 +14,7 @@ drydock-core.workspace = true
 drydock-win32.workspace = true
 drydock-gfx.workspace = true
 drydock-audio.workspace = true
-drydock-joystick = { workspace = true, features = ["device"] }
+drydock-joystick = { workspace = true, features = ["device", "gamepad"] }
 serde.workspace = true
 serde_json.workspace = true
 anyhow.workspace = true
