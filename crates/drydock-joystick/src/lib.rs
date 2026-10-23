@@ -3,3 +3,4 @@
 //! (Physical Interface Device) force-feedback driver, and host game controllers.
 
 pub mod ff;
+pub mod hid;
