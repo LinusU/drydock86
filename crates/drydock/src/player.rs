@@ -10,6 +10,7 @@ use crate::driver::{Driver, Pacing};
 use crate::launch::RunArgs;
 use anyhow::Result;
 use drydock_joystick::device::{self, Event as StickEvent};
+use drydock_joystick::gamepad;
 use drydock_joystick::input::JoyState;
 use drydock_win32::input::{InputEvent, vk_is_extended, vk_to_scan};
 use drydock_win32::session::{RunStop, Session};
@@ -155,6 +156,40 @@ fn key_event(vk: u8, down: bool) -> InputEvent {
     }
 }
 
+/// Which kind of host controller drives the joystick.
+enum Backend {
+    /// A real joystick through HID, with force feedback.
+    Hid,
+    /// An Xbox-style gamepad through gilrs.
+    Gamepad,
+}
+
+/// Joysticks go through HID; a gamepad (which HID would also list, with a guessed
+/// layout) goes through gilrs. With `--joystick-device` the match decides, and without it
+/// a real joystick wins over a gamepad. None when nothing is to be attached.
+fn choose_backend(args: &RunArgs) -> Option<Backend> {
+    let filter = args.joystick_device.as_deref();
+    if filter == Some("none") {
+        return None;
+    }
+    let pads = gamepad::connected();
+    let is_pad = |c: &device::Candidate| pads.iter().any(|p| (p.vid, p.pid) == (c.vid, c.pid));
+    let joysticks: Vec<device::Candidate> = device::api()
+        .map(|api| device::candidates(&api))
+        .unwrap_or_default()
+        .into_iter()
+        .filter(|c| !is_pad(c) && filter.is_none_or(|f| c.matches(f)))
+        .collect();
+    if args.joystick && !joysticks.is_empty() {
+        return Some(Backend::Hid);
+    }
+    if pads.iter().any(|p| filter.is_none_or(|f| p.matches(f))) {
+        return Some(Backend::Gamepad);
+    }
+    // Nothing found yet: `--joystick` waits for a joystick to be plugged in.
+    args.joystick.then_some(Backend::Hid)
+}
+
 /// A host game controller driving the joystick.
 struct HostStick {
     events: Receiver<StickEvent>,
@@ -163,7 +198,7 @@ struct HostStick {
     /// Latest state, and when axes were last forwarded.
     latest: JoyState,
     axes_at: Option<Instant>,
-    _thread: device::Running,
+    _thread: Box<dyn std::any::Any>,
 }
 
 impl HostStick {
@@ -171,33 +206,43 @@ impl HostStick {
     /// every forwarded event is also recorded in the input timeline).
     const AXIS_INTERVAL: Duration = Duration::from_millis(8);
 
+    /// A connected gamepad attaches the joystick without `--joystick`; a real joystick
+    /// (which also gets force feedback) needs the flag.
     fn attach(s: &mut Session, args: &RunArgs) -> Option<HostStick> {
-        if !args.joystick || args.joystick_device.as_deref() == Some("none") {
-            return None;
-        }
+        let backend = choose_backend(args)?;
         let (tx, events) = channel();
-        let running = device::spawn(
-            device::Options {
-                filter: args.joystick_device.clone(),
-                force_feedback: (!args.no_force_feedback).then_some(args.force_feedback_strength),
-            },
-            Box::new(move |e| tx.send(e).is_ok()),
-        );
-        if !args.no_force_feedback {
-            let host = Box::new(drydock_joystick::ff::ChannelSink(running.commands.clone()));
-            s.host.ff = Some(match s.host.ff.take() {
-                Some(log) => Box::new(drydock_joystick::ff::Tee(vec![log, host])),
-                None => host,
-            });
-            // A restored checkpoint already has effects on the device.
-            drydock_win32::com::dinput_ff::resync(s);
-        }
+        let sink = Box::new(move |e| tx.send(e).is_ok());
+        let thread: Box<dyn std::any::Any> = match backend {
+            Backend::Gamepad => {
+                s.user.input.joy_present = true;
+                Box::new(gamepad::spawn(args.joystick_device.clone(), sink))
+            }
+            Backend::Hid => {
+                let running = device::spawn(
+                    device::Options {
+                        filter: args.joystick_device.clone(),
+                        force_feedback: (!args.no_force_feedback).then_some(args.force_feedback_strength),
+                    },
+                    sink,
+                );
+                if !args.no_force_feedback {
+                    let host = Box::new(drydock_joystick::ff::ChannelSink(running.commands.clone()));
+                    s.host.ff = Some(match s.host.ff.take() {
+                        Some(log) => Box::new(drydock_joystick::ff::Tee(vec![log, host])),
+                        None => host,
+                    });
+                    // A restored checkpoint already has effects on the device.
+                    drydock_win32::com::dinput_ff::resync(s);
+                }
+                Box::new(running)
+            }
+        };
         Some(HostStick {
             events,
             sent: JoyState::default(),
             latest: JoyState::default(),
             axes_at: None,
-            _thread: running,
+            _thread: thread,
         })
     }
 
