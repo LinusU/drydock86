@@ -55,7 +55,15 @@ fn is_gamepad(g: &Gamepad) -> bool {
 /// The gamepads connected now. Empty when the controller subsystem cannot start.
 pub fn connected() -> Vec<Pad> {
     match Gilrs::new() {
-        Ok(g) => g.gamepads().filter(|(_, p)| is_gamepad(p)).map(|(_, p)| pad_of(&p)).collect(),
+        Ok(mut g) => {
+            // Some platforms (macOS) announce the gamepads that are already connected
+            // as events after startup.
+            while g.next_event_blocking(Some(Duration::from_millis(100))).is_some() {}
+            g.gamepads()
+                .filter(|(_, p)| is_gamepad(p))
+                .map(|(_, p)| pad_of(&p))
+                .collect()
+        }
         Err(e) => {
             log::warn!("game controller support unavailable: {e}");
             Vec::new()
@@ -212,6 +220,8 @@ fn run(filter: Option<String>, events: Box<dyn Fn(Event) -> bool + Send>, stop: 
                 }
                 continue;
             }
+            // The first gamepad to appear is adopted below.
+            EventType::Connected if active.is_none() => {}
             EventType::Connected | EventType::Dropped | EventType::Disconnected => continue,
             _ => {}
         }
