@@ -46,6 +46,7 @@ tables were converted mechanically from the C sources.
 | clap | 4.x | MIT OR Apache-2.0 | Command line |
 | sha2, hex | 0.10, 0.4 | MIT OR Apache-2.0 | Provenance hashes |
 | libc | 0.2 | MIT OR Apache-2.0 | Host process/thread calls |
+| ctrlc | 3.x | MIT OR Apache-2.0 | Resetting the joystick when interrupted |
 
 The remaining transitive dependencies (about 350 crates in total) are licensed under
 MIT, Apache-2.0, BSD, Zlib, ISC, Unlicense, CC0-1.0 or combinations of these; a few

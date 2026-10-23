@@ -2,16 +2,20 @@
 //!
 //! The session runs on its own thread with realtime pacing. The window thread forwards
 //! host keyboard/mouse input into the virtual input devices and displays the frames the
-//! emulated display presents. Closing the window stops the session.
+//! emulated display presents. A host game controller, when the joystick is attached,
+//! drives the joystick from its own thread and plays the guest's force feedback.
+//! Closing the window stops the session.
 
 use crate::driver::{Driver, Pacing};
 use crate::launch::RunArgs;
 use anyhow::Result;
+use drydock_joystick::device::{self, Event as StickEvent};
+use drydock_joystick::input::JoyState;
 use drydock_win32::input::{InputEvent, vk_is_extended, vk_to_scan};
-use drydock_win32::session::RunStop;
+use drydock_win32::session::{RunStop, Session};
 use std::sync::Arc;
-use std::sync::mpsc::{Receiver, SyncSender, TryRecvError, sync_channel};
-use std::time::Duration;
+use std::sync::mpsc::{Receiver, SyncSender, TryRecvError, channel, sync_channel};
+use std::time::{Duration, Instant};
 use winit::application::ApplicationHandler;
 use winit::event::{DeviceEvent, ElementState, MouseButton, MouseScrollDelta, WindowEvent};
 use winit::event_loop::{ActiveEventLoop, ControlFlow, EventLoop, EventLoopProxy};
@@ -151,6 +155,90 @@ fn key_event(vk: u8, down: bool) -> InputEvent {
     }
 }
 
+/// A host game controller driving the joystick.
+struct HostStick {
+    events: Receiver<StickEvent>,
+    /// State the guest has been given.
+    sent: JoyState,
+    /// Latest state, and when axes were last forwarded.
+    latest: JoyState,
+    axes_at: Option<Instant>,
+    _thread: device::Running,
+}
+
+impl HostStick {
+    /// Axis changes are forwarded at most this often (the guest reads once a frame;
+    /// every forwarded event is also recorded in the input timeline).
+    const AXIS_INTERVAL: Duration = Duration::from_millis(8);
+
+    fn attach(s: &mut Session, args: &RunArgs) -> Option<HostStick> {
+        if !args.joystick || args.joystick_device.as_deref() == Some("none") {
+            return None;
+        }
+        let (tx, events) = channel();
+        let running = device::spawn(
+            device::Options {
+                filter: args.joystick_device.clone(),
+                force_feedback: (!args.no_force_feedback).then_some(args.force_feedback_strength),
+            },
+            Box::new(move |e| tx.send(e).is_ok()),
+        );
+        if !args.no_force_feedback {
+            let host = Box::new(drydock_joystick::ff::ChannelSink(running.commands.clone()));
+            s.host.ff = Some(match s.host.ff.take() {
+                Some(log) => Box::new(drydock_joystick::ff::Tee(vec![log, host])),
+                None => host,
+            });
+            // A restored checkpoint already has effects on the device.
+            drydock_win32::com::dinput_ff::resync(s);
+        }
+        Some(HostStick {
+            events,
+            sent: JoyState::default(),
+            latest: JoyState::default(),
+            axes_at: None,
+            _thread: running,
+        })
+    }
+
+    /// Input events for what changed since the guest was last told.
+    fn poll(&mut self) -> Vec<InputEvent> {
+        while let Ok(e) = self.events.try_recv() {
+            match e {
+                StickEvent::State(st) => self.latest = st,
+                StickEvent::Status(msg) => eprintln!("{msg}"),
+            }
+        }
+        let (prev, st) = (self.sent, self.latest);
+        let mut out = Vec::new();
+        for b in 0..32u8 {
+            if (prev.buttons ^ st.buttons) >> b & 1 != 0 {
+                out.push(InputEvent::JoyButton {
+                    button: b,
+                    down: st.buttons >> b & 1 != 0,
+                });
+            }
+        }
+        if prev.pov != st.pov {
+            out.push(InputEvent::JoyPov { pov: st.pov });
+        }
+        self.sent.buttons = st.buttons;
+        self.sent.pov = st.pov;
+        let now = Instant::now();
+        if prev.axes != st.axes
+            && self
+                .axes_at
+                .is_none_or(|t| now.duration_since(t) >= Self::AXIS_INTERVAL)
+        {
+            let [x, y, z, r] = st.axes;
+            out.push(InputEvent::JoyAxes { x, y, z, r });
+            self.sent.axes = st.axes;
+            self.axes_at = Some(now);
+        }
+        out
+    }
+}
+
 fn session_thread(args: RunArgs, rx: Receiver<ToSession>, tx: SyncSender<ToUi>, proxy: EventLoopProxy<()>) {
     // The emulation thread must run on performance cores like the UI does; macOS
     // otherwise schedules a spawned thread at a lower quality-of-service class.
@@ -172,6 +260,7 @@ fn session_thread(args: RunArgs, rx: Receiver<ToSession>, tx: SyncSender<ToUi>, 
         return;
     }
     s.user.auto_dismiss_dialogs = args.auto_dismiss_dialogs;
+    let mut stick = HostStick::attach(&mut s, &args);
     if let Some(p) = &args.replay_input
         && let Err(e) = crate::launch::schedule_replay(&mut s, p)
     {
@@ -206,6 +295,12 @@ fn session_thread(args: RunArgs, rx: Receiver<ToSession>, tx: SyncSender<ToUi>, 
                     return;
                 }
                 Err(TryRecvError::Empty) => break,
+            }
+        }
+        if let Some(st) = stick.as_mut() {
+            let now = d.s.clock.now_ns();
+            for ev in st.poll() {
+                d.s.user.input.schedule(now, ev);
             }
         }
         let stop = d.advance(4_000_000, false);
@@ -529,6 +624,7 @@ impl Gfx {
 
 struct App {
     args: RunArgs,
+    session: Option<std::thread::JoinHandle<()>>,
     gfx: Option<Gfx>,
     to_session: Option<SyncSender<ToSession>>,
     from_session: Option<Receiver<ToUi>>,
@@ -566,15 +662,26 @@ impl ApplicationHandler for App {
         let (utx, urx) = sync_channel::<ToUi>(2);
         let args = self.args.clone();
         let proxy = self.proxy.clone();
-        std::thread::Builder::new()
+        let session = std::thread::Builder::new()
             .name("drydock-session".into())
             .stack_size(64 << 20)
             .spawn(move || session_thread(args, rx, utx, proxy))
             .expect("session thread");
+        self.session = Some(session);
         self.to_session = Some(tx);
         self.from_session = Some(urx);
         // The emulated application starts with focus.
         self.send(ToSession::Input(InputEvent::Focus { active: true }));
+    }
+
+    /// Also reached when the application is quit from its menu (Cmd-Q), after which
+    /// the process exits without returning from the event loop.
+    fn exiting(&mut self, _el: &ActiveEventLoop) {
+        self.send(ToSession::Quit);
+        self.to_session = None;
+        if let Some(t) = self.session.take() {
+            let _ = t.join();
+        }
     }
 
     fn user_event(&mut self, el: &ActiveEventLoop, _e: ()) {
@@ -665,11 +772,19 @@ impl ApplicationHandler for App {
 }
 
 pub fn run(args: RunArgs) -> Result<()> {
+    if args.joystick {
+        // Interrupted or terminated: leave no force playing on the controller.
+        let _ = ctrlc::set_handler(|| {
+            device::shutdown_all(Duration::from_millis(500));
+            std::process::exit(130);
+        });
+    }
     let el = EventLoop::new()?;
     el.set_control_flow(ControlFlow::Wait);
     let proxy = el.create_proxy();
     let mut app = App {
         args,
+        session: None,
         gfx: None,
         to_session: None,
         from_session: None,
@@ -678,6 +793,11 @@ pub fn run(args: RunArgs) -> Result<()> {
         guest_size: (640, 480),
     };
     el.run_app(&mut app)?;
+    // Let the session finish its artifacts and release the joystick.
+    app.to_session = None;
+    if let Some(t) = app.session.take() {
+        let _ = t.join();
+    }
     if let Some(s) = app.status {
         eprintln!("{s}");
     }

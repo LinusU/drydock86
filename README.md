@@ -71,7 +71,10 @@ Other useful options (see `drydock run --help`):
 | `--trace <API>` | Record calls of matching APIs (substring match). |
 | `--cpu-mhz N`, `--cpu-mips N` | Guest CPU profile (default 800 MHz, 800 MIPS). |
 | `--software-gpu`, `--gpu-backend <b>` | Choose the wgpu adapter or backend. |
-| `--joystick` | Attach a virtual joystick. |
+| `--joystick` | Attach a joystick (a SideWinder Force Feedback 2 with force feedback); in play mode a host game controller drives it. |
+| `--joystick-device <sel>` | Host controller for the joystick: `045e:001b` (vendor:product) or part of its name; `none` for scripted input only. |
+| `--force-feedback-strength N` | Scale force feedback on the host controller to N percent (default 100). |
+| `--no-force-feedback` | Do not play force feedback on the host controller. |
 | `--force-feedback-log <file>` | Write the joystick's force-feedback commands (JSON lines with virtual time). |
 
 `drydock inspect --exe <file>` prints PE headers, sections, imports and hashes.

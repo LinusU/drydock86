@@ -78,9 +78,21 @@ pub struct RunArgs {
     /// In play mode, stop after --seconds of virtual time.
     #[arg(long)]
     pub play_limit: bool,
-    /// Attach a virtual joystick.
+    /// Attach a joystick (a SideWinder Force Feedback 2 with force feedback). In play
+    /// mode a host game controller drives it.
     #[arg(long)]
     pub joystick: bool,
+    /// Host controller for --joystick in play mode: "045e:001b" (vendor:product) or
+    /// part of its name; "none" leaves the joystick to scripted input. Defaults to the
+    /// first controller found (one connected later is picked up).
+    #[arg(long)]
+    pub joystick_device: Option<String>,
+    /// Do not play force-feedback effects on the host controller.
+    #[arg(long)]
+    pub no_force_feedback: bool,
+    /// Strength of force feedback on the host controller, in percent.
+    #[arg(long, default_value_t = 100, value_parser = clap::value_parser!(u32).range(0..=100))]
+    pub force_feedback_strength: u32,
     /// Write the joystick's force-feedback commands to this file (JSON lines).
     #[arg(long)]
     pub force_feedback_log: Option<PathBuf>,
