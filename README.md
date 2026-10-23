@@ -71,7 +71,7 @@ Other useful options (see `drydock run --help`):
 | `--trace <API>` | Record calls of matching APIs (substring match). |
 | `--cpu-mhz N`, `--cpu-mips N` | Guest CPU profile (default 800 MHz, 800 MIPS). |
 | `--software-gpu`, `--gpu-backend <b>` | Choose the wgpu adapter or backend. |
-| `--joystick` | Attach a joystick (a SideWinder Force Feedback 2 with force feedback); in play mode a host game controller drives it. |
+| `--joystick` | Attach a joystick (a SideWinder Force Feedback 2 with force feedback); in play mode a host game controller drives it. A connected Xbox-style gamepad attaches it without the flag. |
 | `--joystick-device <sel>` | Host controller for the joystick: `045e:001b` (vendor:product) or part of its name; `none` for scripted input only. |
 | `--force-feedback-strength N` | Scale force feedback on the host controller to N percent (default 100). |
 | `--no-force-feedback` | Do not play force feedback on the host controller. |
@@ -80,6 +80,11 @@ Other useful options (see `drydock run --help`):
 `drydock inspect --exe <file>` prints PE headers, sections, imports and hashes.
 
 ## Joysticks and force feedback
+
+An Xbox-style gamepad (anything with an SDL gamepad mapping) needs no flag: it is attached
+when connected. The left stick is X/Y, the right stick the rudder, the triggers the
+throttle, and the D-pad the hat. A gamepad has no force feedback. Real joysticks go
+through HID as below.
 
 With `--joystick`, play mode uses the first game controller it finds (or one plugged
 in later) and plays the program's force-feedback effects on it when it is a USB PID

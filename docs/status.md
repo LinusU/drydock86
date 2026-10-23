@@ -123,7 +123,8 @@ shown.
   periodic and condition effects with envelopes, start delay and gain; download,
   start/stop and status on virtual time; device commands, state, gain and
   auto-centre. Custom forces are not offered. In the player a host game controller
-  drives it and USB PID force-feedback controllers play the effects.
+  drives it: joysticks through HID (USB PID force-feedback controllers play the effects),
+  Xbox-style gamepads through gilrs (no force feedback).
 - **DirectSound:** primary and secondary buffers, duplication, play/write cursors on
   virtual time, looping, notifications, volume/pan/frequency, 3D listener and buffers
   (distance attenuation, panning and Doppler are mixed; cone parameters are stored but not applied), software mixing to device, WAV or discard.
