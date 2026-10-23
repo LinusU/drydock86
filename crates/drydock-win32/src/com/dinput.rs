@@ -121,6 +121,19 @@ fn direct_input_create_ex(s: &mut Session) -> ApiResult {
     }
 }
 
+/// CoCreateInstance(CLSID_DirectInput): the program calls Initialize afterwards.
+pub fn create_via_com(s: &mut Session, iid: &Guid, ppv: u32) -> ApiResult {
+    let def = if *iid == IID_IUNKNOWN {
+        Some(&IDIRECTINPUTA)
+    } else {
+        DINPUT_IFACES.iter().copied().find(|d| d.iid == *iid)
+    };
+    match def {
+        Some(d) => create(s, 0, ppv, d),
+        None => Ok(ApiRet::Ret(E_NOINTERFACE)),
+    }
+}
+
 fn kind_of(g: &Guid) -> Option<DevKind> {
     match *g {
         GUID_SYSKEYBOARD => Some(DevKind::Keyboard),
@@ -223,7 +236,15 @@ fn di_get_device_status(s: &mut Session) -> ApiResult {
     }))
 }
 
-fn di_initialize(_s: &mut Session) -> ApiResult {
+fn di_initialize(s: &mut Session) -> ApiResult {
+    let [_this, _hinst, ver] = s.args::<3>()?;
+    if ver > 0x0700 {
+        return Ok(ApiRet::Ret(0x8878_0001));
+    }
+    let id = s.this_obj()?;
+    if let Some(ComKind::DInput(o)) = s.com_obj_mut(id).map(|o| &mut o.kind) {
+        o.version = ver;
+    }
     Ok(ApiRet::Ret(DI_OK))
 }
 

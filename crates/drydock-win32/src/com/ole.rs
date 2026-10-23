@@ -50,6 +50,7 @@ fn co_create_instance(s: &mut Session) -> ApiResult {
     }
     match class_object(&clsid) {
         Some("DirectSound") => super::dsound::create_via_com(s, &iid, ppv),
+        Some("DirectInput") => super::dinput::create_via_com(s, &iid, ppv),
         Some(other) => {
             s.missing("CoCreateInstance", format!("class {other} via COM activation"));
             Ok(ApiRet::Ret(REGDB_E_CLASSNOTREG))
