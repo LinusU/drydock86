@@ -57,11 +57,21 @@ guest (`--map 'C:\WINNT\Fonts=…'`). Verified headless on the same host:
 | Menus | Main menu, Preferences, Credits, Multiplayer options, pilot selection; all text drawn with the game's TrueType fonts (Andy Bold, Trebuchet MS, Bell MT, …) |
 | Instant Action | Mission list and drop-down selections, briefing, 3D flight at 1024×768 with terrain, aircraft, sky, fog, rain, HUD and gauges; keyboard flight controls and guns respond; Esc pause menu; Quit leads to the debriefing |
 | Campaign | Pilot selection, intro movie (skipped with Esc), hangar, animated briefing map with voice-over, Flight Check, first mission's launch sequence from the Pandora |
+| Joystick and force feedback | With `--joystick` (SideWinder Force Feedback 2), scripted joystick input in Instant Action: the throttle slider sets engine power (207 mph at full, 61 mph at idle), the stick banks the plane, button 1 fires the guns and button 2 a rocket. The game hands the joystick to Immersion's IFC library (`ifc21.dll`), which creates the 16 effects of `crimsonff.ifr` (constant forces with envelopes, sawtooth, sine and triangle rumbles) with the parameters in that file; the gun effect starts and stops with the trigger and rockets play their kick, as recorded by `--force-feedback-log` |
 | Speed | Menus faster than realtime. In flight the game renders 60 frames per virtual second with about 800 draw calls each and transforms and lights vertices itself on the x87; headless unthrottled runs it at about 0.7× realtime (15 s in 21.6 s), and the desktop player runs flight in slow motion (about 0.6×, dropping the lag) |
 
+With a real SideWinder Force Feedback 2 on macOS (USB, no driver): its report
+descriptor is byte-identical to the captured one the tests use; `drydock joystick
+--test-force-feedback` runs every step without error and the stick's own PID state
+reports confirm each effect playing and stopping; in the player, a restored flight
+checkpoint downloads the game's 16 effects to the stick and gunfire and a rocket
+start theirs, with no device errors. Not verified: how the forces feel (the stick
+applies force only with a hand on the grip and nobody held it), stick position input
+(nobody moved it; the stick stalls requests for its current state, so the throttle is
+known only once moved), Linux hosts.
+
 Not verified: completing a mission, later campaign missions, multiplayer (DirectPlay
-is unavailable), joystick and mouse flight, saving and loading campaign progress
-across runs. Known defect: on the debriefing screen, the second line of a label the
+is unavailable), mouse flight, saving and loading campaign progress across runs. Known defect: on the debriefing screen, the second line of a label the
 game wraps (such as "Danger Zones Completed") is drawn into the text bitmap but not
 shown.
 
@@ -87,7 +97,8 @@ shown.
   in the guest's Fonts folder when a face is installed there, else with the bundled
   Liberation fonts.
 - **Other system DLLs:** INI profiles, FormatMessage, date and time formatting,
-  version resources (version.dll), MS ADPCM and IMA ADPCM decoding (msacm32).
+  version resources (version.dll), MS ADPCM and IMA ADPCM decoding (msacm32), COM
+  activation, GUID strings, CoCreateGuid (reproducible) and the task allocator (ole32).
 - **advapi32:** registry with `.reg` import/export, persisted in the overlay.
 - **DirectDraw 7 / 4 / 2 / 1:** display modes, primary and flip chains with vsync-retired
   flips, offscreen and texture surfaces in system/video memory, mip chains, locks,
@@ -106,7 +117,13 @@ shown.
   DirectDraw surface with audio (amstream).
 - **DirectPlay lobby:** reports that the program was not started by a lobby.
 - **DirectInput 7:** keyboard, mouse, joystick; buffered and immediate data,
-  acquisition and cooperative levels.
+  acquisition and cooperative levels, dead zone and saturation, COM activation and
+  CreateDeviceEx. The joystick is a SideWinder Force Feedback 2 (X, Y, twist,
+  throttle slider, 8 buttons, hat) with force feedback: the standard constant, ramp,
+  periodic and condition effects with envelopes, start delay and gain; download,
+  start/stop and status on virtual time; device commands, state, gain and
+  auto-centre. Custom forces are not offered. In the player a host game controller
+  drives it and USB PID force-feedback controllers play the effects.
 - **DirectSound:** primary and secondary buffers, duplication, play/write cursors on
   virtual time, looping, notifications, volume/pan/frequency, 3D listener and buffers
   (distance attenuation, panning and Doppler are mixed; cone parameters are stored but not applied), software mixing to device, WAV or discard.

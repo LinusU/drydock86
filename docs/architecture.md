@@ -13,6 +13,7 @@ the pieces fit and which invariants they keep.
 | `drydock-win32` | The session: loader, scheduler, kernel objects, system DLLs, COM, devices, diagnostics, checkpoints |
 | `drydock-gfx` | wgpu renderer: textures, fixed-function shader, draws, readback (headless capable) |
 | `drydock-audio` | Host audio sinks: device (cpal), WAV file, discard, tee |
+| `drydock-joystick` | Force-feedback effect model, HID report descriptors, USB PID force feedback, host game controllers (hidapi) |
 | `drydock-media` | AVI container parsing and the Indeo 5 video decoder (ported from FFmpeg) |
 | `drydock` | CLI, pacing driver, scenario runner, JSON protocol server, desktop player |
 | `drydock-fixtures` | Generates PE32 test programs from Rust source, and Indeo 5 / AVI test media (tests only) |
@@ -223,6 +224,24 @@ player), scenarios and the protocol schedule timestamped events into it; events 
 when virtual time reaches them. Every applied event is recorded, which is the input
 timeline written to `provenance.json` and accepted by `--replay-input`. Focus and
 key-release events are explicit so a cancelled experiment cannot leave keys stuck.
+
+The joystick (`--joystick`) presents itself as a Microsoft SideWinder Force Feedback
+2: X and Y, twist (Rz), a throttle slider, eight buttons and a hat, in both
+DirectInput and winmm. In the player a host game controller drives it from its own
+thread (`drydock-joystick::device`): input reports are decoded through the
+controller's HID report descriptor and enter as ordinary timestamped events.
+
+Force feedback follows the same rule as audio: the guest-visible state lives in the
+session and nothing comes back from the host. DirectInput effects
+(`com/dinput_ff.rs`) keep their parameters, download state and playing status on
+virtual time (playing until start delay plus iterations × duration has passed), and
+require exclusive acquisition as on Windows. Downloads, starts, stops and device
+commands are also sent, with their virtual time, to `Host::ff`: in the player a
+channel to the controller thread, which plays them on USB PID (HID Physical
+Interface Device) hardware by writing the device's own reports, found by usage in its
+report descriptor (`drydock-joystick::pid`); with `--force-feedback-log` a JSON-lines
+file. DirectInput's auto-centre, which PID devices do not have, is a spring effect
+the driver keeps on the device while auto-centre is on.
 
 ## Diagnostics
 
