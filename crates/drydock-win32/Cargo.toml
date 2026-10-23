@@ -9,6 +9,7 @@ license.workspace = true
 drydock-core.workspace = true
 drydock-gfx.workspace = true
 drydock-audio.workspace = true
+drydock-joystick.workspace = true
 drydock-media.workspace = true
 slopmpeg.workspace = true
 serde.workspace = true

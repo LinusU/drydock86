@@ -10,6 +10,7 @@ pub mod d3d;
 pub mod d3d6;
 pub mod ddraw;
 pub mod dinput;
+pub mod dinput_ff;
 pub mod dmusic;
 pub mod dplay;
 pub mod dsound;
@@ -106,6 +107,7 @@ pub enum ComKind {
     VertexBuffer(d3d::VertexBuffer),
     DInput(dinput::DInputObj),
     DInputDevice(Box<dinput::DiDevice>),
+    DInputEffect(Box<dinput_ff::DiEffect>),
     DSound(dsound::DSoundObj),
     DSBuffer(Box<dsound::DsBuffer>),
     Ds3dListener(u32),
@@ -255,6 +257,7 @@ impl Session {
             ComKind::Surface(sf) => ddraw::surface_destroyed(self, id, sf),
             ComKind::DSBuffer(b) => dsound::buffer_destroyed(self, id, *b),
             ComKind::DInputDevice(d) => dinput::device_destroyed(self, id, *d),
+            ComKind::DInputEffect(e) => dinput_ff::effect_destroyed(self, id, *e),
             ComKind::Device(d) => d3d::device_destroyed(self, id, *d),
             ComKind::DirectDraw(d) => ddraw::ddraw_destroyed(self, id, d),
             ComKind::MmStream(m) => amstream::stream_destroyed(self, &m),
@@ -285,6 +288,7 @@ pub static ALL_IFACES: &[&IfaceDef] = &[
     &dinput::IDIRECTINPUTDEVICEA,
     &dinput::IDIRECTINPUTDEVICE2A,
     &dinput::IDIRECTINPUTDEVICE7A,
+    &dinput_ff::IDIRECTINPUTEFFECT,
     &dsound::IDIRECTSOUND,
     &dsound::IDIRECTSOUNDBUFFER,
     &dsound::IDIRECTSOUNDNOTIFY,
@@ -358,6 +362,7 @@ fn supported(kind: &ComKind) -> Vec<&'static IfaceDef> {
         ComKind::MmStream(_) | ComKind::MediaStream(_) | ComKind::StreamSample(_) => amstream::supported(kind),
         ComKind::DInput(_) => dinput::DINPUT_IFACES.to_vec(),
         ComKind::DInputDevice(_) => dinput::DEVICE_IFACES.to_vec(),
+        ComKind::DInputEffect(_) => vec![&dinput_ff::IDIRECTINPUTEFFECT],
         ComKind::DSound(_) => vec![&dsound::IDIRECTSOUND],
         ComKind::DSBuffer(_) => dsound::BUFFER_IFACES.to_vec(),
         ComKind::Ds3dListener(_) => vec![&dsound::IDIRECTSOUND3DLISTENER],

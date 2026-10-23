@@ -3,6 +3,10 @@
 //! Devices read the shared virtual input state ([`crate::input`]); buffered data is fed
 //! from the same timestamped events that produce window messages, so human and scripted
 //! input reach DirectInput identically.
+//!
+//! The joystick looks like a Microsoft SideWinder Force Feedback 2: X and Y with force
+//! actuators, twist (Rz), a throttle slider, eight buttons and a hat. Its force
+//! feedback lives in [`super::dinput_ff`].
 
 use super::*;
 use crate::input::InputEvent;
@@ -28,10 +32,21 @@ pub const GUID_JOYSTICK: Guid = guid("6f1d2b70-d5a0-11cf-bfc7-444553540000");
 pub const GUID_XAXIS: Guid = guid("a36d02e0-c9f3-11cf-bfc7-444553540000");
 pub const GUID_YAXIS: Guid = guid("a36d02e1-c9f3-11cf-bfc7-444553540000");
 pub const GUID_ZAXIS: Guid = guid("a36d02e2-c9f3-11cf-bfc7-444553540000");
+pub const GUID_RXAXIS: Guid = guid("a36d02f4-c9f3-11cf-bfc7-444553540000");
+pub const GUID_RYAXIS: Guid = guid("a36d02f5-c9f3-11cf-bfc7-444553540000");
 pub const GUID_RZAXIS: Guid = guid("a36d02e3-c9f3-11cf-bfc7-444553540000");
+pub const GUID_SLIDER: Guid = guid("a36d02e4-c9f3-11cf-bfc7-444553540000");
 pub const GUID_BUTTON: Guid = guid("a36d02f0-c9f3-11cf-bfc7-444553540000");
 pub const GUID_KEY: Guid = guid("55728220-d33c-11cf-bfc7-444553540000");
 pub const GUID_POV: Guid = guid("a36d02f2-c9f3-11cf-bfc7-444553540000");
+/// Product GUID of the SideWinder Force Feedback 2 (vendor 045e, product 001b).
+const GUID_SIDEWINDER_FF2: Guid = guid("001b045e-0000-0000-0000-504944564944");
+/// CLSID of the DirectInput PID force-feedback driver.
+const GUID_PID_DRIVER: Guid = guid("eec6993a-b3fd-11d2-a916-00c04fb98638");
+
+const DIDFT_FFACTUATOR: u32 = 0x0100_0000;
+const DIDOI_FFACTUATOR: u32 = 0x1;
+const DIDOI_ASPECTPOSITION: u32 = 0x100;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub enum DevKind {
@@ -48,6 +63,7 @@ pub struct DInputObj {
 /// One object of a device: an axis, button or key.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub enum Obj {
+    /// 0 X, 1 Y, 2 Z (the mouse wheel), 3 Rx, 4 Ry, 5 Rz, 6 slider.
     Axis(u32),
     Button(u32),
     Key(u32),
@@ -78,8 +94,20 @@ pub struct DiDevice {
     /// Accumulated relative mouse motion since the last GetDeviceState.
     pub accum: [i32; 3],
     pub last_abs: Option<(i32, i32)>,
+    /// Per axis slot (see [`slot`]).
     pub ranges: [(i32, i32); 4],
     pub deadzone: [u32; 4],
+    #[serde(default = "full_saturation")]
+    pub saturation: [u32; 4],
+    /// Last buffered value per data-format offset, for joystick axes and the hat.
+    #[serde(default)]
+    pub last_values: std::collections::BTreeMap<u32, u32>,
+    #[serde(default)]
+    pub ff: super::dinput_ff::FfState,
+}
+
+fn full_saturation() -> [u32; 4] {
+    [10000; 4]
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -155,7 +183,8 @@ fn dev_type(k: DevKind) -> u32 {
     match k {
         DevKind::Mouse => 2 | (1 << 8),
         DevKind::Keyboard => 3 | (4 << 8),
-        DevKind::Joystick => 4 | (1 << 8),
+        // DIDEVTYPE_JOYSTICK, flight stick, HID.
+        DevKind::Joystick => 4 | (3 << 8) | 0x1_0000,
     }
 }
 
@@ -163,20 +192,43 @@ fn device_instance(k: DevKind) -> Vec<u8> {
     let mut b = vec![0u8; 580];
     b[0..4].copy_from_slice(&580u32.to_le_bytes());
     b[4..20].copy_from_slice(&instance_guid(k));
-    b[20..36].copy_from_slice(&instance_guid(k));
+    let product = match k {
+        DevKind::Joystick => GUID_SIDEWINDER_FF2,
+        _ => instance_guid(k),
+    };
+    b[20..36].copy_from_slice(&product);
     b[36..40].copy_from_slice(&dev_type(k).to_le_bytes());
     let name: &[u8] = match k {
         DevKind::Keyboard => b"Keyboard",
         DevKind::Mouse => b"Mouse",
-        DevKind::Joystick => b"Drydock Virtual Joystick",
+        DevKind::Joystick => b"SideWinder Force Feedback 2 Joystick",
     };
     b[40..40 + name.len()].copy_from_slice(name);
     b[300..300 + name.len()].copy_from_slice(name);
+    if k == DevKind::Joystick {
+        // guidFFDriver, wUsagePage, wUsage.
+        b[560..576].copy_from_slice(&GUID_PID_DRIVER);
+        b[576..578].copy_from_slice(&1u16.to_le_bytes());
+        b[578..580].copy_from_slice(&4u16.to_le_bytes());
+    }
     b
 }
 
 fn di_create_device(s: &mut Session) -> ApiResult {
     let [_this, rguid, pp, outer] = s.args::<4>()?;
+    create_device(s, rguid, &IDIRECTINPUTDEVICE7A, pp, outer)
+}
+
+fn di_create_device_ex(s: &mut Session) -> ApiResult {
+    let [_this, rguid, riid, pp, outer] = s.args::<5>()?;
+    let iid = s.read_guid(riid)?;
+    match DEVICE_IFACES.iter().copied().find(|d| d.iid == iid) {
+        Some(def) => create_device(s, rguid, def, pp, outer),
+        None => Ok(ApiRet::Ret(E_NOINTERFACE)),
+    }
+}
+
+fn create_device(s: &mut Session, rguid: u32, def: &'static IfaceDef, pp: u32, outer: u32) -> ApiResult {
     if outer != 0 {
         return Ok(ApiRet::Ret(0x8004_0110));
     }
@@ -187,7 +239,13 @@ fn di_create_device(s: &mut Session) -> ApiResult {
     if kind == DevKind::Joystick && !s.user.input.joy_present {
         return Ok(ApiRet::Ret(DIERR_DEVICENOTREG));
     }
-    let dev = DiDevice {
+    let id = s.com_new(ComKind::DInputDevice(Box::new(new_device(kind))));
+    s.out_iface(pp, id, def)?;
+    Ok(ApiRet::Ret(DI_OK))
+}
+
+pub(super) fn new_device(kind: DevKind) -> DiDevice {
+    DiDevice {
         kind,
         acquired: false,
         coop: 0,
@@ -204,14 +262,14 @@ fn di_create_device(s: &mut Session) -> ApiResult {
         last_abs: None,
         ranges: [(0, 65535); 4],
         deadzone: [0; 4],
-    };
-    let id = s.com_new(ComKind::DInputDevice(Box::new(dev)));
-    s.out_iface(pp, id, &IDIRECTINPUTDEVICE7A)?;
-    Ok(ApiRet::Ret(DI_OK))
+        saturation: full_saturation(),
+        last_values: Default::default(),
+        ff: Default::default(),
+    }
 }
 
 fn di_enum_devices(s: &mut Session) -> ApiResult {
-    let [_this, ty, cb, ctx, _flags] = s.args::<5>()?;
+    let [_this, ty, cb, ctx, flags] = s.args::<5>()?;
     let mut items = Vec::new();
     let mut kinds = vec![DevKind::Mouse, DevKind::Keyboard];
     if s.user.input.joy_present {
@@ -219,7 +277,11 @@ fn di_enum_devices(s: &mut Session) -> ApiResult {
     }
     for k in kinds {
         let t = dev_type(k) & 0xff;
-        if ty == 0 || ty == t || (ty == 1 && false) {
+        // DIEDFL_FORCEFEEDBACK: only devices with force feedback.
+        if flags & 0x100 != 0 && k != DevKind::Joystick {
+            continue;
+        }
+        if ty == 0 || ty == t {
             items.push(vec![CallArg::Buf(device_instance(k)), CallArg::Val(ctx)]);
         }
     }
@@ -250,7 +312,7 @@ fn di_initialize(s: &mut Session) -> ApiResult {
 
 // ---------------------------------------------------------------- device
 
-fn dev_self(s: &Session) -> Result<(u32, DiDevice), ApiError> {
+pub(super) fn dev_self(s: &Session) -> Result<(u32, DiDevice), ApiError> {
     let id = s.this_obj()?;
     match &s.com_obj(id).unwrap().kind {
         ComKind::DInputDevice(d) => Ok((id, (**d).clone())),
@@ -278,11 +340,22 @@ fn objects(k: DevKind) -> Vec<Obj> {
             Obj::Button(2),
         ],
         DevKind::Joystick => {
-            let mut v = vec![Obj::Axis(0), Obj::Axis(1), Obj::Axis(2), Obj::Axis(5)];
+            let mut v = vec![Obj::Axis(0), Obj::Axis(1), Obj::Axis(5), Obj::Axis(6)];
             v.extend((0..8).map(Obj::Button));
             v.push(Obj::Pov(0));
             v
         }
+    }
+}
+
+/// Index into the per-axis arrays and the input state's joystick axes: X, Y, throttle
+/// (Z or slider), and twist.
+pub(super) fn slot(a: u32) -> usize {
+    match a {
+        0 => 0,
+        1 => 1,
+        2 | 6 => 2,
+        _ => 3,
     }
 }
 
@@ -295,6 +368,9 @@ fn obj_guid(o: Obj) -> Guid {
         Obj::Axis(0) => GUID_XAXIS,
         Obj::Axis(1) => GUID_YAXIS,
         Obj::Axis(2) => GUID_ZAXIS,
+        Obj::Axis(3) => GUID_RXAXIS,
+        Obj::Axis(4) => GUID_RYAXIS,
+        Obj::Axis(6) => GUID_SLIDER,
         Obj::Axis(_) => GUID_RZAXIS,
         Obj::Button(_) => GUID_BUTTON,
         Obj::Key(_) => GUID_KEY,
@@ -302,14 +378,42 @@ fn obj_guid(o: Obj) -> Guid {
     }
 }
 
-fn obj_type(o: Obj, rel: bool) -> u32 {
-    // DIDFT_MAKEINSTANCE(n) | type bits
-    match o {
-        Obj::Axis(n) => (n << 8) | if rel { 1 } else { 2 },
-        Obj::Button(n) => (n << 8) | 4,
-        Obj::Key(n) => (n << 8) | 4,
-        Obj::Pov(n) => (n << 8) | 0x10,
+/// Instance number of an object: its position among the device's objects of its type.
+fn instance(k: DevKind, o: Obj) -> u32 {
+    match (k, o) {
+        (DevKind::Joystick, Obj::Axis(_)) => objects(k)
+            .iter()
+            .filter(|x| matches!(x, Obj::Axis(_)))
+            .position(|x| *x == o)
+            .unwrap_or(0) as u32,
+        (_, Obj::Axis(n) | Obj::Button(n) | Obj::Key(n) | Obj::Pov(n)) => n,
     }
+}
+
+/// The object's id (DIDFT_MAKEINSTANCE(n) | type bits | flags).
+pub(super) fn obj_type(k: DevKind, o: Obj, rel: bool) -> u32 {
+    let n = instance(k, o);
+    match o {
+        Obj::Axis(a) => {
+            let ff = if k == DevKind::Joystick && a <= 1 {
+                DIDFT_FFACTUATOR
+            } else {
+                0
+            };
+            (n << 8) | if rel { 1 } else { 2 } | ff
+        }
+        Obj::Button(_) | Obj::Key(_) => (n << 8) | 4,
+        Obj::Pov(_) => (n << 8) | 0x10,
+    }
+}
+
+/// The object with this id: same instance and type class (axis, button or POV).
+pub(super) fn obj_by_id(k: DevKind, id: u32) -> Option<Obj> {
+    let class = |t: u32| [t & 3 != 0, t & 0xc != 0, t & 0x10 != 0];
+    objects(k).into_iter().find(|o| {
+        let t = obj_type(k, *o, false);
+        (t >> 8) & 0xffff == (id >> 8) & 0xffff && class(t) == class(id)
+    })
 }
 
 fn dev_set_data_format(s: &mut Session) -> ApiResult {
@@ -344,7 +448,7 @@ fn dev_set_data_format(s: &mut Session) -> ApiResult {
             {
                 return false;
             }
-            let ot = obj_type(**ob, d.rel_axes);
+            let ot = obj_type(d.kind, **ob, d.rel_axes);
             let type_ok = (tybits & 0x3 != 0 && ot & 0x3 != 0)
                 || (tybits & 0xc != 0 && ot & 0xc != 0)
                 || (tybits & 0x10 != 0 && ot & 0x10 != 0)
@@ -409,12 +513,13 @@ fn dev_acquire(s: &mut Session) -> ApiResult {
     Ok(ApiRet::Ret(DI_OK))
 }
 
-fn dev_unacquire(s: &mut Session) -> ApiResult {
+pub(super) fn dev_unacquire(s: &mut Session) -> ApiResult {
     let (id, d) = dev_self(s)?;
     if !d.acquired {
         return Ok(ApiRet::Ret(S_FALSE));
     }
     dev_mut(s, id).acquired = false;
+    super::dinput_ff::on_unacquire(s, id);
     Ok(ApiRet::Ret(DI_OK))
 }
 
@@ -424,6 +529,7 @@ fn check_acquired(s: &mut Session, id: u32, d: &DiDevice) -> Option<u32> {
     }
     if !focus_ok(s, d) {
         dev_mut(s, id).acquired = false;
+        super::dinput_ff::on_unacquire(s, id);
         return Some(DIERR_INPUTLOST);
     }
     None
@@ -458,9 +564,8 @@ fn obj_value(s: &Session, d: &mut DiDevice, o: Obj) -> u32 {
             }
         }
         (DevKind::Joystick, Obj::Axis(a)) => {
-            let raw = inp.joy_axes[(a as usize).min(3)] as i64;
-            let (lo, hi) = d.ranges[(a as usize).min(3)];
-            (lo as i64 + raw * (hi as i64 - lo as i64) / 65535) as u32
+            let k = slot(a);
+            joy_axis(inp.joy_axes[k], d.ranges[k], d.deadzone[k], d.saturation[k]) as u32
         }
         (DevKind::Joystick, Obj::Button(b)) => {
             if inp.joy_buttons & (1 << b) != 0 {
@@ -469,9 +574,26 @@ fn obj_value(s: &Session, d: &mut DiDevice, o: Obj) -> u32 {
                 0
             }
         }
-        (DevKind::Joystick, Obj::Pov(_)) => 0xffff_ffff,
+        (DevKind::Joystick, Obj::Pov(_)) => inp.joy_pov,
         _ => 0,
     }
+}
+
+/// An absolute axis reading (0..=65535) in the program's range, with DirectInput's
+/// dead zone and saturation (both in 0..=10000 of the distance from the centre).
+fn joy_axis(raw: u16, (lo, hi): (i32, i32), dead: u32, sat: u32) -> i32 {
+    let p = (raw as f64 / 65535.0) * 2.0 - 1.0;
+    let (dz, sat) = (dead.min(10000) as f64 / 10000.0, sat.min(10000) as f64 / 10000.0);
+    let m = p.abs();
+    let q = if m <= dz {
+        0.0
+    } else if m >= sat || sat <= dz {
+        1.0
+    } else {
+        (m - dz) / (sat - dz)
+    };
+    let p = q.copysign(p);
+    (lo as f64 + (p + 1.0) / 2.0 * (hi as f64 - lo as f64)).round() as i32
 }
 
 fn vk_for_dik(scan: u16, ext: bool) -> u8 {
@@ -586,18 +708,20 @@ fn dev_poll(s: &mut Session) -> ApiResult {
     Ok(ApiRet::Ret(1)) // DI_NOEFFECT
 }
 
+/// The axis slot a property header addresses (None for the whole device).
 fn prop_obj(d: &DiDevice, how: u32, obj: u32) -> Option<usize> {
-    match how {
-        0 => None,
-        1 => d.format.iter().find(|f| f.ofs == obj).map(|f| match f.obj {
-            Obj::Axis(a) => a.min(3) as usize,
-            _ => 0,
-        }),
-        _ => Some(((obj >> 8) & 0xffff).min(3) as usize),
-    }
+    let o = match how {
+        0 => return None,
+        1 => d.format.iter().find(|f| f.ofs == obj).map(|f| f.obj),
+        _ => obj_by_id(d.kind, obj),
+    };
+    Some(match o {
+        Some(Obj::Axis(a)) => slot(a),
+        _ => 0,
+    })
 }
 
-fn dev_set_property(s: &mut Session) -> ApiResult {
+pub(super) fn dev_set_property(s: &mut Session) -> ApiResult {
     let [_this, rguid, ph] = s.args::<3>()?;
     let (id, d) = dev_self(s)?;
     let prop = if rguid < 0x10000 { rguid } else { 0 };
@@ -627,16 +751,29 @@ fn dev_set_property(s: &mut Session) -> ApiResult {
             }
         }
         5 | 6 => {
+            // DIPROP_DEADZONE / DIPROP_SATURATION
             let v = s.mem.read_u32(ph + 16)?;
+            if v > 10000 {
+                return Ok(ApiRet::Ret(DIERR_INVALIDPARAM));
+            }
             let dm = dev_mut(s, id);
+            let arr = if prop == 5 {
+                &mut dm.deadzone
+            } else {
+                &mut dm.saturation
+            };
             match prop_obj(&d, how, obj) {
-                Some(a) => dm.deadzone[a] = v,
-                None => dm.deadzone = [v; 4],
+                Some(a) => arr[a] = v,
+                None => *arr = [v; 4],
             }
         }
         7 | 9 => {
-            // FFGAIN / AUTOCENTER: no force feedback hardware.
-            return Ok(ApiRet::Ret(DIERR_UNSUPPORTED));
+            // DIPROP_FFGAIN / DIPROP_AUTOCENTER
+            if d.kind != DevKind::Joystick || how != 0 {
+                return Ok(ApiRet::Ret(DIERR_UNSUPPORTED));
+            }
+            let v = s.mem.read_u32(ph + 16)?;
+            return Ok(ApiRet::Ret(super::dinput_ff::set_property(s, id, prop, v)));
         }
         _ => {
             s.missing("DirectInput", format!("SetProperty {prop}"));
@@ -648,7 +785,7 @@ fn dev_set_property(s: &mut Session) -> ApiResult {
 
 fn dev_get_property(s: &mut Session) -> ApiResult {
     let [_this, rguid, ph] = s.args::<3>()?;
-    let (_id, d) = dev_self(s)?;
+    let (id, d) = dev_self(s)?;
     let prop = if rguid < 0x10000 { rguid } else { 0 };
     let how = s.mem.read_u32(ph + 12)?;
     let obj = s.mem.read_u32(ph + 8)?;
@@ -661,9 +798,16 @@ fn dev_get_property(s: &mut Session) -> ApiResult {
             s.mem.write_u32(ph + 16, lo as u32)?;
             s.mem.write_u32(ph + 20, hi as u32)?;
         }
-        5 | 6 => s
+        5 => s
             .mem
             .write_u32(ph + 16, d.deadzone[prop_obj(&d, how, obj).unwrap_or(0)])?,
+        6 => s
+            .mem
+            .write_u32(ph + 16, d.saturation[prop_obj(&d, how, obj).unwrap_or(0)])?,
+        7..=9 if d.kind == DevKind::Joystick => match super::dinput_ff::get_property(s, id, prop) {
+            Ok(v) => s.mem.write_u32(ph + 16, v)?,
+            Err(e) => return Ok(ApiRet::Ret(e)),
+        },
         _ => return Ok(ApiRet::Ret(DIERR_UNSUPPORTED)),
     }
     Ok(ApiRet::Ret(DI_OK))
@@ -681,7 +825,27 @@ fn dev_get_capabilities(s: &mut Session) -> ApiResult {
     let povs = objs.iter().filter(|o| matches!(o, Obj::Pov(_))).count() as u32;
     let size = s.mem.read_u32(p)?.clamp(4, 44);
     let mut b = vec![0u8; size as usize];
-    for (i, v) in [size, 1, dev_type(d.kind), axes, buttons, povs].iter().enumerate() {
+    // DIDC_ATTACHED; the joystick adds DIDC_FORCEFEEDBACK and the effect features
+    // (attack, fade, saturation, signed coefficients and saturation, dead band), a
+    // 1 ms sample period and time resolution, and driver version 1.
+    let (flags, ff_period, ff_res, ff_ver) = match d.kind {
+        DevKind::Joystick => (0xfd01, 1000, 1000, 1),
+        _ => (1, 0, 0, 0),
+    };
+    let caps = [
+        size,
+        flags,
+        dev_type(d.kind),
+        axes,
+        buttons,
+        povs,
+        ff_period,
+        ff_res,
+        0,
+        0,
+        ff_ver,
+    ];
+    for (i, v) in caps.iter().enumerate() {
         if i * 4 + 4 <= b.len() {
             b[i * 4..i * 4 + 4].copy_from_slice(&v.to_le_bytes());
         }
@@ -690,16 +854,25 @@ fn dev_get_capabilities(s: &mut Session) -> ApiResult {
     Ok(ApiRet::Ret(DI_OK))
 }
 
-fn object_instance(o: Obj, rel: bool, ofs: u32, size: u32) -> Vec<u8> {
-    let mut b = vec![0u8; size.max(296) as usize];
+fn object_instance(k: DevKind, o: Obj, rel: bool, ofs: u32, size: u32) -> Vec<u8> {
+    let mut b = vec![0u8; size.max(316) as usize];
     b[0..4].copy_from_slice(&size.to_le_bytes());
     b[4..20].copy_from_slice(&obj_guid(o));
     b[20..24].copy_from_slice(&ofs.to_le_bytes());
-    b[24..28].copy_from_slice(&obj_type(o, rel).to_le_bytes());
+    let ty = obj_type(k, o, rel);
+    b[24..28].copy_from_slice(&ty.to_le_bytes());
+    if ty & DIDFT_FFACTUATOR != 0 {
+        // dwFlags, dwFFMaxForce, dwFFForceResolution.
+        b[28..32].copy_from_slice(&(DIDOI_FFACTUATOR | DIDOI_ASPECTPOSITION).to_le_bytes());
+        b[292..296].copy_from_slice(&10000u32.to_le_bytes());
+        b[296..300].copy_from_slice(&1u32.to_le_bytes());
+    }
     let name = match o {
         Obj::Axis(0) => "X-axis".to_string(),
         Obj::Axis(1) => "Y-axis".to_string(),
-        Obj::Axis(2) => "Wheel".to_string(),
+        Obj::Axis(2) if k == DevKind::Mouse => "Wheel".to_string(),
+        Obj::Axis(2) => "Z-axis".to_string(),
+        Obj::Axis(6) => "Slider".to_string(),
         Obj::Axis(_) => "Rz-axis".to_string(),
         Obj::Button(n) => format!("Button {n}"),
         Obj::Key(k) => crate::input::scan_name((k & 0x7f) as u16, k & 0x80 != 0)
@@ -718,14 +891,14 @@ fn dev_enum_objects(s: &mut Session) -> ApiResult {
     let (_id, d) = dev_self(s)?;
     let mut items = Vec::new();
     for o in objects(d.kind) {
-        let t = obj_type(o, d.rel_axes);
+        let t = obj_type(d.kind, o, d.rel_axes);
         // DIDFT_ALL = 0; otherwise filter by type bits.
         if flags != 0 && flags & t & 0x1f == 0 {
             continue;
         }
         let ofs = d.format.iter().find(|f| f.obj == o).map(|f| f.ofs).unwrap_or(0);
         items.push(vec![
-            CallArg::Buf(object_instance(o, d.rel_axes, ofs, 316)),
+            CallArg::Buf(object_instance(d.kind, o, d.rel_axes, ofs, 316)),
             CallArg::Val(ctx),
         ]);
     }
@@ -738,12 +911,12 @@ fn dev_get_object_info(s: &mut Session) -> ApiResult {
     let size = s.mem.read_u32(p)?;
     let o = match how {
         1 => d.format.iter().find(|f| f.ofs == obj).map(|f| f.obj),
-        2 => objects(d.kind).into_iter().find(|o| obj_type(*o, d.rel_axes) == obj),
+        2 => obj_by_id(d.kind, obj),
         _ => None,
     };
     match o {
         Some(o) => {
-            let b = object_instance(o, d.rel_axes, obj, size);
+            let b = object_instance(d.kind, o, d.rel_axes, obj, size);
             s.mem.write(p, &b)?;
             Ok(ApiRet::Ret(DI_OK))
         }
@@ -769,14 +942,8 @@ fn dev_set_event_notification(s: &mut Session) -> ApiResult {
     Ok(ApiRet::Ret(DI_OK))
 }
 
-fn dev_ff_none(_s: &mut Session) -> ApiResult {
-    // The virtual devices have no force-feedback hardware.
+fn dev_escape(_s: &mut Session) -> ApiResult {
     Ok(ApiRet::Ret(DIERR_UNSUPPORTED))
-}
-
-fn dev_enum_effects(s: &mut Session) -> ApiResult {
-    let [_this, _cb, _ctx, _ty] = s.args::<4>()?;
-    Ok(ApiRet::Ret(DI_OK))
 }
 
 fn dev_initialize(_s: &mut Session) -> ApiResult {
@@ -794,6 +961,7 @@ pub fn on_input(s: &mut Session, at_ns: u64, ev: &InputEvent) {
         .map(|(k, _)| *k)
         .collect();
     let (mx, my) = (s.user.input.mouse_x, s.user.input.mouse_y);
+    let (axes, pov) = (s.user.input.joy_axes, s.user.input.joy_pov);
     let mut events = Vec::new();
     for id in ids {
         let d = dev_mut(s, id);
@@ -859,6 +1027,22 @@ pub fn on_input(s: &mut Session, at_ns: u64, ev: &InputEvent) {
             (DevKind::Joystick, InputEvent::JoyButton { button, down }) => {
                 push(d, Obj::Button(*button as u32), if *down { 0x80 } else { 0 });
             }
+            (DevKind::Joystick, InputEvent::JoyAxes { .. } | InputEvent::JoyPov { .. }) => {
+                // Buffer the axes and hat whose reported value changed.
+                for f in d.format.clone() {
+                    let v = match f.obj {
+                        Obj::Axis(a) => {
+                            let k = slot(a);
+                            joy_axis(axes[k], d.ranges[k], d.deadzone[k], d.saturation[k]) as u32
+                        }
+                        Obj::Pov(_) => pov,
+                        _ => continue,
+                    };
+                    if d.last_values.insert(f.ofs, v) != Some(v) {
+                        push(d, f.obj, v);
+                    }
+                }
+            }
             _ => {}
         }
     }
@@ -918,7 +1102,7 @@ pub static IDIRECTINPUT7A: IfaceDef = IfaceDef {
         unimpl_method!("RunControlPanel", 3),
         export!("Initialize", 3, di_initialize),
         unimpl_method!("FindDevice", 4),
-        unimpl_method!("CreateDeviceEx", 5),
+        export!("CreateDeviceEx", 5, di_create_device_ex),
     ],
 };
 
@@ -962,13 +1146,17 @@ pub static IDIRECTINPUTDEVICE2A: IfaceDef = IfaceDef {
     iid: guid("5944e682-c92e-11cf-bfc7-444553540000"),
     module: "DINPUT.DLL",
     methods: device_methods!(
-        export!("CreateEffect", 5, dev_ff_none),
-        export!("EnumEffects", 4, dev_enum_effects),
-        export!("GetEffectInfo", 3, dev_ff_none),
-        export!("GetForceFeedbackState", 2, dev_ff_none),
-        export!("SendForceFeedbackCommand", 2, dev_ff_none),
-        unimpl_method!("EnumCreatedEffectObjects", 4),
-        export!("Escape", 2, dev_ff_none),
+        export!("CreateEffect", 5, super::dinput_ff::dev_create_effect),
+        export!("EnumEffects", 4, super::dinput_ff::dev_enum_effects),
+        export!("GetEffectInfo", 3, super::dinput_ff::dev_get_effect_info),
+        export!("GetForceFeedbackState", 2, super::dinput_ff::dev_get_ff_state),
+        export!("SendForceFeedbackCommand", 2, super::dinput_ff::dev_send_ff_command),
+        export!(
+            "EnumCreatedEffectObjects",
+            4,
+            super::dinput_ff::dev_enum_created_effects
+        ),
+        export!("Escape", 2, dev_escape),
         export!("Poll", 1, dev_poll),
         unimpl_method!("SendDeviceData", 5)
     ),
@@ -979,13 +1167,17 @@ pub static IDIRECTINPUTDEVICE7A: IfaceDef = IfaceDef {
     iid: guid("57d7c6bc-2356-11d3-8e9d-00c04f6844ae"),
     module: "DINPUT.DLL",
     methods: device_methods!(
-        export!("CreateEffect", 5, dev_ff_none),
-        export!("EnumEffects", 4, dev_enum_effects),
-        export!("GetEffectInfo", 3, dev_ff_none),
-        export!("GetForceFeedbackState", 2, dev_ff_none),
-        export!("SendForceFeedbackCommand", 2, dev_ff_none),
-        unimpl_method!("EnumCreatedEffectObjects", 4),
-        export!("Escape", 2, dev_ff_none),
+        export!("CreateEffect", 5, super::dinput_ff::dev_create_effect),
+        export!("EnumEffects", 4, super::dinput_ff::dev_enum_effects),
+        export!("GetEffectInfo", 3, super::dinput_ff::dev_get_effect_info),
+        export!("GetForceFeedbackState", 2, super::dinput_ff::dev_get_ff_state),
+        export!("SendForceFeedbackCommand", 2, super::dinput_ff::dev_send_ff_command),
+        export!(
+            "EnumCreatedEffectObjects",
+            4,
+            super::dinput_ff::dev_enum_created_effects
+        ),
+        export!("Escape", 2, dev_escape),
         export!("Poll", 1, dev_poll),
         unimpl_method!("SendDeviceData", 5),
         unimpl_method!("EnumEffectsInFile", 5),

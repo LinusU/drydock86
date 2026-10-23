@@ -180,6 +180,8 @@ pub struct Host {
     pub gpu_versions: std::collections::HashMap<u32, u64>,
     /// Where mixed audio goes (host device, file, or nothing).
     pub audio: Option<Box<dyn drydock_audio::AudioSink>>,
+    /// Where the joystick's force-feedback commands go (host controller or nothing).
+    pub ff: Option<Box<dyn drydock_joystick::ff::ForceSink>>,
     /// Fonts found in the guest's Fonts folder (read on first use).
     pub guest_fonts: Option<Vec<crate::dll::fonts::GuestFont>>,
 }

@@ -491,6 +491,9 @@ impl Cpu {
     pub fn esp(&self) -> u32 {
         self.reg(R::ESP)
     }
+    pub fn set_esp(&mut self, v: u32) {
+        self.set_reg(R::ESP, v)
+    }
 
     pub fn read_regs(&self) -> Regs {
         let r = |x| self.uc.reg_read(x).unwrap_or(0) as u32;

@@ -309,11 +309,17 @@ fn joy_get_dev_caps_a(s: &mut Session) -> ApiResult {
     }
     let mut b = vec![0u8; (n as usize).min(404)];
     if b.len() >= 52 {
+        // The SideWinder Force Feedback 2: X, Y, throttle (Z), twist (R), 8 buttons, hat.
         b[0..2].copy_from_slice(&0x045eu16.to_le_bytes());
-        b[2..4].copy_from_slice(&0x0001u16.to_le_bytes());
-        let name = b"Drydock Virtual Joystick";
+        b[2..4].copy_from_slice(&0x001bu16.to_le_bytes());
+        let name = b"SideWinder Force Feedback 2";
         b[4..4 + name.len()].copy_from_slice(name);
-        for (i, v) in [0u32, 65535, 0, 65535, 0, 65535, 32, 10, 1000].iter().enumerate() {
+        // X/Y/Z ranges, buttons, polling periods, R/U/V ranges, wCaps (HASZ, HASR,
+        // HASPOV, POVCTS), most and present axes, most buttons.
+        let caps = [
+            0u32, 65535, 0, 65535, 0, 65535, 8, 10, 1000, 0, 65535, 0, 0, 0, 0, 0x53, 6, 4, 32,
+        ];
+        for (i, v) in caps.iter().enumerate() {
             let o = 36 + i * 4;
             if o + 4 <= b.len() {
                 b[o..o + 4].copy_from_slice(&v.to_le_bytes());
