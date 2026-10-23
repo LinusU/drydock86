@@ -81,6 +81,9 @@ pub struct RunArgs {
     /// Attach a virtual joystick.
     #[arg(long)]
     pub joystick: bool,
+    /// Write the joystick's force-feedback commands to this file (JSON lines).
+    #[arg(long)]
+    pub force_feedback_log: Option<PathBuf>,
     /// Host pacing of the virtual clock.
     #[arg(long, value_enum, default_value_t = crate::driver::Pacing::Unthrottled)]
     pub pacing: crate::driver::Pacing,
@@ -242,6 +245,10 @@ pub fn configure_host(s: &mut Session, a: &RunArgs) -> Result<()> {
     };
     s.host.audio = audio_sink(a.audio_spec())?;
     s.user.input.joy_present = a.joystick;
+    if let Some(p) = &a.force_feedback_log {
+        let f = std::fs::File::create(p).with_context(|| format!("--force-feedback-log {}", p.display()))?;
+        s.host.ff = Some(Box::new(drydock_joystick::ff::LogSink(std::io::BufWriter::new(f))));
+    }
     Ok(())
 }
 

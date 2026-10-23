@@ -72,6 +72,7 @@ Other useful options (see `drydock run --help`):
 | `--cpu-mhz N`, `--cpu-mips N` | Guest CPU profile (default 800 MHz, 800 MIPS). |
 | `--software-gpu`, `--gpu-backend <b>` | Choose the wgpu adapter or backend. |
 | `--joystick` | Attach a virtual joystick. |
+| `--force-feedback-log <file>` | Write the joystick's force-feedback commands (JSON lines with virtual time). |
 
 `drydock inspect --exe <file>` prints PE headers, sections, imports and hashes.
 

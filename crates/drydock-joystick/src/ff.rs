@@ -157,6 +157,44 @@ impl ForceSink for ChannelSink {
     }
 }
 
+/// Writes each command as a line of JSON: `{"t": seconds, "cmd": …}`.
+pub struct LogSink(pub std::io::BufWriter<std::fs::File>);
+
+impl ForceSink for LogSink {
+    fn send(&mut self, at_ns: u64, cmd: Command) {
+        use std::io::Write;
+        #[derive(Serialize)]
+        struct Line {
+            t: f64,
+            cmd: Command,
+        }
+        let line = Line {
+            t: at_ns as f64 / 1e9,
+            cmd,
+        };
+        if let Ok(j) = serde_json::to_string(&line) {
+            let _ = writeln!(self.0, "{j}");
+        }
+    }
+    fn name(&self) -> String {
+        "log".into()
+    }
+}
+
+/// Sends every command to several sinks.
+pub struct Tee(pub Vec<Box<dyn ForceSink>>);
+
+impl ForceSink for Tee {
+    fn send(&mut self, at_ns: u64, cmd: Command) {
+        for s in &mut self.0 {
+            s.send(at_ns, cmd.clone());
+        }
+    }
+    fn name(&self) -> String {
+        self.0.iter().map(|s| s.name()).collect::<Vec<_>>().join("+")
+    }
+}
+
 /// Drop parameter updates that a later update of the same effect replaces, so a guest
 /// that changes an effect every frame does not queue up work for a slow device.
 pub fn coalesce(cmds: Vec<Command>) -> Vec<Command> {
